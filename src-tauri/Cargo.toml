@@ -1,0 +1,23 @@
+[package]
+name = "livesprite-companion"
+version = "1.0.0"
+description = "LiveSprite desktop companion"
+authors = ["LiveSprite"]
+edition = "2021"
+
+[[bin]]
+name = "livesprite-companion"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["time", "sync"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-autostart = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-opener = "2"

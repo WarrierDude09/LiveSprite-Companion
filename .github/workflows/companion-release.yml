@@ -1,0 +1,53 @@
+name: Companion release
+
+on:
+  push:
+    tags:
+      - "companion-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            artifact: LiveSprite-Companion-Windows-x64.msi
+          - platform: macos-latest
+            artifact: LiveSprite-Companion-macOS.dmg
+          - platform: ubuntu-22.04
+            artifact: LiveSprite-Companion-Linux-x86_64.AppImage
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Install Linux prerequisites
+        if: matrix.platform == 'ubuntu-22.04'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - run: npm ci
+      - run: npm run tauri build
+      - name: Stage Windows bundle
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: Copy-Item (Get-ChildItem src-tauri/target/release/bundle/msi/*.msi | Select-Object -First 1) "${{ matrix.artifact }}"
+      - name: Stage macOS bundle
+        if: matrix.platform == 'macos-latest'
+        run: cp "$(find src-tauri/target/release/bundle/dmg -name '*.dmg' -print -quit)" "${{ matrix.artifact }}"
+      - name: Stage Linux bundle
+        if: matrix.platform == 'ubuntu-22.04'
+        run: cp "$(find src-tauri/target/release/bundle/appimage -name '*.AppImage' -print -quit)" "${{ matrix.artifact }}"
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          files: ${{ matrix.artifact }}
+
