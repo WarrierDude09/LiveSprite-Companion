@@ -123,15 +123,63 @@ fn dispatch(app:&AppHandle,shortcut:&Shortcut,event:ShortcutState){let state=app
     let binding=state.bindings.lock().ok().and_then(|v|v.get(&shortcut.id()).cloned());let Some(binding)=binding else{return};let release=matches!(event,ShortcutState::Released);if release&&binding.mode!="hold"{return}let c=state.config();
     tauri::async_runtime::spawn(async move{let _:Result<serde_json::Value,String>=post(&state.client,&c.gateway_url,serde_json::json!({"action":"event","pairToken":c.pair_token,"bindingId":binding.id,"release":release})).await;});}
 
-fn update_status(s:&AppState,text:&str){if let Ok(i)=s.status_item.lock(){if let Some(i)=i.as_ref(){let _=i.set_text(text)}}}
-fn update_project(s:&AppState){let n=s.config().active_project_name;let text=if n.is_empty(){"Active Project: None".into()}else{format!("Active Project: {n}")};if let Ok(i)=s.project_item.lock(){if let Some(i)=i.as_ref(){let _=i.set_text(text)}}}
-fn update_pause(s:&AppState){let text=if s.paused.load(Ordering::Acquire){"Resume Hotkeys"}else{"Pause Hotkeys"};if let Ok(i)=s.pause_item.lock(){if let Some(i)=i.as_ref(){let _=i.set_text(text)}}}
-fn update_autostart(s:&AppState,on:bool){if let Ok(i)=s.autostart_item.lock(){if let Some(i)=i.as_ref(){let _=i.set_text(if on{"Disable autostart"}else{"Start with OS"})}}}
-fn update_connected(s:&AppState){if s.paused.load(Ordering::Acquire){update_status(s,"Status: Connected · Paused")}else{let n=*s.registered_count.lock().expect("count lock");update_status(s,&format!("Status: Connected · {n} hotkeys"))}update_pause(s)}
+fn update_status(s: &AppState, text: &str) {
+    if let Ok(item) = s.status_item.lock() {
+        if let Some(item) = item.as_ref() { let _ = item.set_text(text); }
+    }
+}
+fn update_project(s: &AppState) {
+    let name = s.config().active_project_name;
+    let text = if name.is_empty() { "Active Project: None".into() } else { format!("Active Project: {name}") };
+    if let Ok(item) = s.project_item.lock() {
+        if let Some(item) = item.as_ref() { let _ = item.set_text(text); }
+    }
+}
+fn update_pause(s: &AppState) {
+    let text = if s.paused.load(Ordering::Acquire) { "Resume Hotkeys" } else { "Pause Hotkeys" };
+    if let Ok(item) = s.pause_item.lock() {
+        if let Some(item) = item.as_ref() { let _ = item.set_text(text); }
+    }
+}
+fn update_autostart(s: &AppState, on: bool) {
+    if let Ok(item) = s.autostart_item.lock() {
+        if let Some(item) = item.as_ref() { let _ = item.set_text(if on { "Disable autostart" } else { "Start with OS" }); }
+    }
+}
+fn update_connected(s: &AppState) {
+    if s.paused.load(Ordering::Acquire) { update_status(s, "Status: Connected · Paused"); }
+    else { let n = *s.registered_count.lock().expect("count lock"); update_status(s, &format!("Status: Connected · {n} hotkeys")); }
+    update_pause(s);
+}
 async fn set_paused(s:&Arc<AppState>,paused:bool)->Result<(),String>{let c=s.config();if c.pair_token.is_empty(){return Err("No native project is active.".into())}let _:serde_json::Value=post(&s.client,&c.gateway_url,serde_json::json!({"action":"pause","pairToken":c.pair_token,"paused":paused})).await?;s.paused.store(paused,Ordering::Release);update_connected(s);Ok(())}
 async fn heartbeat(s:Arc<AppState>)->Result<(),String>{let c=s.config();if c.pair_token.is_empty(){update_status(&s,"Status: Not paired");return Ok(())}let count=*s.registered_count.lock().map_err(|_|"count unavailable")?;let conflicts=s.conflicts.lock().map_err(|_|"conflicts unavailable")?.clone();
     let r:HeartbeatResponse=post(&s.client,&c.gateway_url,serde_json::json!({"action":"heartbeat","pairToken":c.pair_token,"registeredCount":count,"conflicts":conflicts,"version":VERSION})).await?;s.paused.store(r.hotkeys_paused,Ordering::Release);update_connected(&s);Ok(())}
-fn start_heartbeat(app:AppHandle,s:Arc<AppState>){tauri::async_runtime::spawn(async move{let mut failures=0u8;let mut interval=tokio::time::interval(Duration::from_secs(10));interval.tick().await;loop{interval.tick().await;match heartbeat(s.clone()).await{Ok(())=>{failures=0;if !s.synced.load(Ordering::Acquire)&&!s.config().pair_token.is_empty(){let _=sync_and_register(&app,s.clone()).await}},Err(_)=>{failures=failures.saturating_add(1);if failures>=3{s.synced.store(false,Ordering::Release);update_status(&s,"Status: Disconnected");if sync_and_register(&app,s.clone()).await.is_ok(){failures=0}}}}}})}
+fn start_heartbeat(app: AppHandle, s: Arc<AppState>) {
+    tauri::async_runtime::spawn(async move {
+        let mut failures = 0u8;
+        let mut interval = tokio::time::interval(Duration::from_secs(10));
+        interval.tick().await;
+        loop {
+            interval.tick().await;
+            match heartbeat(s.clone()).await {
+                Ok(()) => {
+                    failures = 0;
+                    if !s.synced.load(Ordering::Acquire) && !s.config().pair_token.is_empty() {
+                        let _ = sync_and_register(&app, s.clone()).await;
+                    }
+                }
+                Err(_) => {
+                    failures = failures.saturating_add(1);
+                    if failures >= 3 {
+                        s.synced.store(false, Ordering::Release);
+                        update_status(&s, "Status: Disconnected");
+                        if sync_and_register(&app, s.clone()).await.is_ok() { failures = 0; }
+                    }
+                }
+            }
+        }
+    });
+}
 fn show_main(app:&AppHandle)->Result<(),String>{let w=app.get_webview_window("main").ok_or("LiveSprite window unavailable")?;w.show().map_err(|e|e.to_string())?;let _=w.unminimize();w.set_focus().map_err(|e|e.to_string())}
 fn spawn_sync(app:AppHandle){let s=app.state::<Arc<AppState>>().inner().clone();tauri::async_runtime::spawn(async move{if sync_and_register(&app,s.clone()).await.is_err(){s.synced.store(false,Ordering::Release);update_status(&s,"Status: Disconnected")}});}
 
@@ -140,15 +188,15 @@ fn main(){tauri::Builder::default()
     .plugin(tauri_plugin_opener::init()).plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent,None))
     .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app,shortcut,event|dispatch(app,shortcut,event.state())).build())
     .invoke_handler(tauri::generate_handler![get_companion_status,activate_project_pairing,resync_hotkeys,set_hotkeys_paused,set_autostart,disconnect_companion,show_main_window,exit_application])
-    .on_window_event(|window,event|{if window.label()=="main"{if let WindowEvent::CloseRequested{api,..}=event{if window.state::<Arc<AppState>>().config().close_to_tray{api.prevent_close();let _=window.hide()}}}})
+    .on_window_event(|window,event|{if window.label()=="main"{if let WindowEvent::CloseRequested{api,..}=event{if window.state::<Arc<AppState>>().config().close_to_tray{api.prevent_close();let _=window.hide();}}}})
     .setup(|app|{let path=app.path().app_config_dir()?.join("companion.json");let mut c=load_config(&path);let auto=app.autolaunch().is_enabled().unwrap_or(c.start_with_os);c.start_with_os=auto;let _=save_config(&path,&c);
         let s=Arc::new(AppState{config:Mutex::new(c.clone()),config_path:path,bindings:Mutex::new(HashMap::new()),conflicts:Mutex::new(Vec::new()),registered_count:Mutex::new(0),paused:AtomicBool::new(false),syncing:AtomicBool::new(false),synced:AtomicBool::new(false),client:Client::builder().timeout(Duration::from_secs(8)).build()?,status_item:Mutex::new(None),project_item:Mutex::new(None),pause_item:Mutex::new(None),autostart_item:Mutex::new(None)});app.manage(s.clone());
         let status=MenuItem::with_id(app,"status",if c.pair_token.is_empty(){"Status: Not paired"}else{"Status: Disconnected"},false,None::<&str>)?;let project=MenuItem::with_id(app,"project",if c.active_project_name.is_empty(){"Active Project: None".into()}else{format!("Active Project: {}",c.active_project_name)},false,None::<&str>)?;
         let open=MenuItem::with_id(app,"open","Open LiveSprite",true,None::<&str>)?;let pause=MenuItem::with_id(app,"pause","Pause Hotkeys",true,None::<&str>)?;let resync=MenuItem::with_id(app,"resync","Re-sync Hotkeys",true,None::<&str>)?;let autostart=MenuItem::with_id(app,"autostart",if auto{"Disable autostart"}else{"Start with OS"},true,None::<&str>)?;let exit=MenuItem::with_id(app,"exit","Exit LiveSprite",true,None::<&str>)?;
         let menu=Menu::with_items(app,&[&status,&project,&open,&pause,&resync,&autostart,&exit])?;*s.status_item.lock().expect("status lock")=Some(status);*s.project_item.lock().expect("project lock")=Some(project);*s.pause_item.lock().expect("pause lock")=Some(pause);*s.autostart_item.lock().expect("autostart lock")=Some(autostart);
         TrayIconBuilder::with_id("main-tray").icon(app.default_window_icon().cloned().expect("icon missing")).tooltip("LiveSprite").menu(&menu).show_menu_on_left_click(false)
-            .on_tray_icon_event(|tray,event|{if matches!(event,TrayIconEvent::DoubleClick{..}){let _=show_main(tray.app_handle())}})
-            .on_menu_event(|app,event|match event.id().as_ref(){"open"=>{let _=show_main(app);},"resync"=>spawn_sync(app.clone()),"pause"=>{let s=app.state::<Arc<AppState>>().inner().clone();tauri::async_runtime::spawn(async move{let p=!s.paused.load(Ordering::Acquire);if set_paused(&s,p).await.is_err(){update_status(&s,"Status: Disconnected")}});},"autostart"=>{let s=app.state::<Arc<AppState>>().inner().clone();let on=!app.autolaunch().is_enabled().unwrap_or(false);if(if on{app.autolaunch().enable()}else{app.autolaunch().disable()}).is_ok(){if let Ok(mut c)=s.config.lock(){c.start_with_os=on;let _=save_config(&s.config_path,&c)}update_autostart(&s,on)}},"exit"=>app.exit(0),_=>{}}).build(app)?;
+            .on_tray_icon_event(|tray,event|{if matches!(event,TrayIconEvent::DoubleClick{..}){let _=show_main(tray.app_handle());}})
+            .on_menu_event(|app,event|match event.id().as_ref(){"open"=>{let _=show_main(app);},"resync"=>spawn_sync(app.clone()),"pause"=>{let s=app.state::<Arc<AppState>>().inner().clone();tauri::async_runtime::spawn(async move{let p=!s.paused.load(Ordering::Acquire);if set_paused(&s,p).await.is_err(){update_status(&s,"Status: Disconnected");}});},"autostart"=>{let s=app.state::<Arc<AppState>>().inner().clone();let on=!app.autolaunch().is_enabled().unwrap_or(false);if(if on{app.autolaunch().enable()}else{app.autolaunch().disable()}).is_ok(){if let Ok(mut c)=s.config.lock(){c.start_with_os=on;let _=save_config(&s.config_path,&c);}update_autostart(&s,on);}},"exit"=>app.exit(0),_=>{}}).build(app)?;
         start_heartbeat(app.handle().clone(),s);if !c.pair_token.is_empty(){spawn_sync(app.handle().clone())}let _=show_main(app.handle());Ok(())})
     .run(tauri::generate_context!()).expect("error while running LiveSprite")}
 
