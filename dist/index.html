@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pair LiveSprite Companion</title>
+  <style>
+    :root { color-scheme: dark; font: 15px system-ui, sans-serif; background: #101224; color: #f6f7ff; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 30px; }
+    h1 { margin: 0 0 8px; font-size: 24px; }
+    p { color: #b7bddb; line-height: 1.45; margin: 0 0 24px; }
+    label { display: block; margin: 16px 0 7px; font-weight: 600; }
+    input { width: 100%; border: 1px solid #3b4268; border-radius: 8px; padding: 11px 12px; background: #181c35; color: white; outline: none; }
+    input:focus { border-color: #46dbe8; box-shadow: 0 0 0 3px #46dbe826; }
+    button { width: 100%; margin-top: 22px; border: 0; border-radius: 8px; padding: 12px; background: linear-gradient(90deg, #21cfe1, #70eba8); color: #071421; font-weight: 800; cursor: pointer; }
+    button:disabled { opacity: .55; cursor: wait; }
+    #status { min-height: 22px; margin-top: 15px; text-align: center; color: #ff8f9f; }
+    #status.ok { color: #70eba8; }
+  </style>
+</head>
+<body>
+  <h1>Pair LiveSprite</h1>
+  <p>Paste the per-project token generated in the LiveSprite web app.</p>
+  <form id="pair-form">
+    <label for="token">Pairing Token</label>
+    <input id="token" autocomplete="off" spellcheck="false" required>
+    <label for="gateway">Gateway URL</label>
+    <input id="gateway" type="url" required value="https://live-png-flow.base44.app/functions/CompanionGateway">
+    <button id="submit" type="submit">Pair</button>
+    <div id="status" role="status" aria-live="polite"></div>
+  </form>
+  <script>
+    const invoke = window.__TAURI__.core.invoke;
+    const form = document.querySelector('#pair-form');
+    const button = document.querySelector('#submit');
+    const status = document.querySelector('#status');
+    window.addEventListener('DOMContentLoaded', async () => {
+      try {
+        const config = await invoke('get_pairing_config');
+        document.querySelector('#token').value = config.pairToken || '';
+        document.querySelector('#gateway').value = config.gatewayUrl;
+      } catch (_) {}
+    });
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      button.disabled = true;
+      status.className = '';
+      status.textContent = 'Pairing and syncing hotkeys…';
+      try {
+        const result = await invoke('pair_companion', {
+          pairToken: document.querySelector('#token').value.trim(),
+          gatewayUrl: document.querySelector('#gateway').value.trim()
+        });
+        status.className = 'ok';
+        status.textContent = `Paired — ${result.registeredCount} hotkey${result.registeredCount === 1 ? '' : 's'} registered.`;
+        setTimeout(() => invoke('hide_pairing_window'), 700);
+      } catch (error) {
+        status.textContent = String(error);
+      } finally {
+        button.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
