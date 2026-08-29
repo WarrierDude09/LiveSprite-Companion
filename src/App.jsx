@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { LiveSpriteAPI } from "./api/liveSpriteApi";
 import { NativeCompanion } from "./native/companion";
-import { listenForGoogleOAuth } from "./auth/googleOAuth";
 
 const GATEWAY_URL = "https://live-png-flow.base44.app/functions/CompanionGateway";
 
@@ -17,7 +16,7 @@ function AuthShell({ children, title, subtitle, footer }) {
   return <main className="auth-page"><section className="auth-card"><div className="logo"><span>✦</span> LiveSprite</div><h1>{title}</h1><p>{subtitle}</p>{children}<div className="auth-footer">{footer}</div></section></main>;
 }
 
-function Login({ onAuthenticated, setAuthView, onGoogle, oauthBusy, oauthError }) {
+function Login({ onAuthenticated, setAuthView }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -35,11 +34,6 @@ function Login({ onAuthenticated, setAuthView, onGoogle, oauthBusy, oauthError }
       <label>Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" required /></label>
       <button type="button" className="forgot" onClick={() => setAuthView("forgot")}>Forgot password?</button>
       <button className="primary" disabled={busy}>{busy ? "Signing in…" : "Sign In"}</button>
-      <div className="divider"><span>or</span></div>
-      {oauthError && <div className="error-banner">{oauthError}</div>}
-      <button type="button" className="google" onClick={onGoogle} disabled={oauthBusy}>
-        {oauthBusy ? "Finish signing in with Google…" : "Continue with Google"}
-      </button>
     </form>
   </AuthShell>;
 }
@@ -126,7 +120,7 @@ function Settings({ user, account, nativeStatus, setAutostart, disconnect }) {
 }
 
 export default function App() {
-  const [state,setState]=useState("starting"); const [authView,setAuthView]=useState("login"); const [user,setUser]=useState(null); const [account,setAccount]=useState(null); const [projects,setProjects]=useState([]); const [selected,setSelected]=useState(null); const [details,setDetails]=useState(null); const [nativeStatus,setNativeStatus]=useState(null); const [page,setPage]=useState("dashboard"); const [error,setError]=useState(""); const [activating,setActivating]=useState(false); const [oauthBusy,setOauthBusy]=useState(false); const [oauthError,setOauthError]=useState("");
+  const [state,setState]=useState("starting"); const [authView,setAuthView]=useState("login"); const [user,setUser]=useState(null); const [account,setAccount]=useState(null); const [projects,setProjects]=useState([]); const [selected,setSelected]=useState(null); const [details,setDetails]=useState(null); const [nativeStatus,setNativeStatus]=useState(null); const [page,setPage]=useState("dashboard"); const [error,setError]=useState(""); const [activating,setActivating]=useState(false);
   const refreshNative=useCallback(async()=>{try{setNativeStatus(await NativeCompanion.getStatus())}catch{}},[]);
   const loadProjects=useCallback(async()=>{const list=await LiveSpriteAPI.projects.list();setProjects(list);setSelected(current=>current||list[0]||null);return list},[]);
   const restore = useCallback(async () => {
@@ -158,24 +152,6 @@ export default function App() {
     }
   }, [loadProjects, refreshNative]);
   useEffect(()=>{restore()},[restore]);
-  useEffect(() => {
-    let unlisten;
-    listenForGoogleOAuth(
-      async (token) => {
-        setOauthError("");
-        await LiveSpriteAPI.auth.acceptOAuthToken(token);
-        setOauthBusy(false);
-        await restore();
-      },
-      (reason) => {
-        setOauthBusy(false);
-        setOauthError(reason?.message || "Google sign-in failed.");
-      },
-    ).then((stop) => { unlisten = stop; }).catch((reason) => {
-      setOauthError(reason?.message || "Google sign-in is unavailable.");
-    });
-    return () => { if (unlisten) unlisten(); };
-  }, [restore]);
   useEffect(()=>{const timer=setInterval(refreshNative,5000);return()=>clearInterval(timer)},[refreshNative]);
   useEffect(()=>{if(!selected){setDetails(null);return}let cancelled=false;LiveSpriteAPI.projectDetails(selected.id).then(value=>{if(!cancelled)setDetails(value)}).catch(reason=>setError(reason?.message||"Unable to load project."));return()=>{cancelled=true}},[selected]);
   const logout=async()=>{await LiveSpriteAPI.auth.logout();setUser(null);setAccount(null);setProjects([]);setDetails(null);setState("auth");setAuthView("login")};
@@ -186,10 +162,9 @@ export default function App() {
   const resync=async()=>{try{await NativeCompanion.resync();await refreshNative()}catch(reason){setError(String(reason))}};
   const setAutostart=async enabled=>{try{await NativeCompanion.setAutostart(enabled);await refreshNative()}catch(reason){setError(String(reason))}};
   const disconnect=async()=>{await NativeCompanion.disconnect();await refreshNative()};
-  const beginGoogleOAuth=async()=>{setOauthError("");setOauthBusy(true);try{await NativeCompanion.beginGoogleOAuth()}catch(reason){setOauthBusy(false);setOauthError(reason?.message||String(reason))}};
   const content=useMemo(()=>{if(page==="dashboard")return <Dashboard account={account} projects={projects} selected={selected} nativeStatus={nativeStatus} setPage={setPage} onSelect={setSelected}/>;if(page==="projects")return <><Projects projects={projects} selected={selected} selectProject={project=>{setSelected(project)}} refresh={loadProjects} createProject={createProject}/>{selected&&<ProjectOverview details={details} saveProject={saveProject} activate={activate} activating={activating} nativeStatus={nativeStatus}/>}</>;if(page==="hotkeys")return <Hotkeys details={details} nativeStatus={nativeStatus} resync={resync} setPaused={setPaused}/>;if(page==="live")return <LivePage details={details}/>;return <Settings user={user} account={account} nativeStatus={nativeStatus} setAutostart={setAutostart} disconnect={disconnect}/>},[page,account,projects,selected,nativeStatus,details,activating]);
   if(state==="starting")return <Spinner/>;
   if(state==="offline")return <ErrorState title="LiveSprite is Offline" message={`${error} Your native Companion is still running in the background.`} onRetry={restore}/>;
-  if(state==="auth"){if(authView==="register")return <Register onAuthenticated={restore} setAuthView={setAuthView}/>;if(authView==="forgot")return <ForgotPassword setAuthView={setAuthView}/>;return <Login onAuthenticated={restore} setAuthView={setAuthView} onGoogle={beginGoogleOAuth} oauthBusy={oauthBusy} oauthError={oauthError}/>}
+  if(state==="auth"){if(authView==="register")return <Register onAuthenticated={restore} setAuthView={setAuthView}/>;if(authView==="forgot")return <ForgotPassword setAuthView={setAuthView}/>;return <Login onAuthenticated={restore} setAuthView={setAuthView}/>}
   return <div className="app-shell"><Sidebar page={page} setPage={setPage} user={user} account={account} onLogout={logout}/><main className="content">{error&&<div className="error-banner dismissible">{error}<button onClick={()=>setError("")}>×</button></div>}{content}</main></div>;
 }

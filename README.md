@@ -6,7 +6,7 @@ Launching the installed application opens the main LiveSprite window. Closing it
 
 ## Authentication and project pairing
 
-The bundled frontend uses the official Base44 SDK with LiveSprite app ID `6a91eb974450aba1bcc39dcd`. Email/password and Google OAuth both authenticate the same LiveSprite account. Google opens in the system browser and returns through a strictly validated `livesprite://login-callback`. Passwords and service credentials are never stored by Rust. The SDK owns the user session, while `companion.json` retains the separate per-project Companion credential used only for `sync`, `heartbeat`, `event`, and `pause`.
+The bundled frontend uses the official Base44 SDK with LiveSprite app ID `6a91eb974450aba1bcc39dcd`. Passwords and service credentials are never stored by Rust. The SDK owns the user session, while `companion.json` retains the separate per-project Companion credential used only for `sync`, `heartbeat`, `event`, and `pause`.
 
 After login, choose a real project and select **Activate Native Hotkeys**. The authenticated frontend invokes the existing `CompanionGateway` `pair` action; Rust validates the returned credential before saving it. Existing v1 `companion.json` files remain compatible and automatically reconnect.
 
@@ -47,4 +47,5 @@ git push origin companion-v1.1.0
 - `LiveSprite-Companion-Linux-x86_64.AppImage`
 
 Ensure the separate web app's `base44/functions/GetCompanionRelease/entry.ts` uses `WarrierDude09/LiveSprite-Companion`. Unsigned Windows and macOS builds may show trust warnings; production distribution requires platform signing credentials.
+
 
