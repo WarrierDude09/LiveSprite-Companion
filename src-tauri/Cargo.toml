@@ -1,12 +1,12 @@
 [package]
-name = "livesprite-companion"
+name = "livesprite"
 version = "1.2.2"
 description = "LiveSprite desktop application"
 authors = ["LiveSprite"]
 edition = "2021"
 
 [[bin]]
-name = "livesprite-companion"
+name = "livesprite"
 path = "src/main.rs"
 
 [build-dependencies]
@@ -23,3 +23,4 @@ tauri-plugin-autostart = "2"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-single-instance = "2"
+open = "5"

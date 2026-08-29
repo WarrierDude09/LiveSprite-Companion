@@ -19,4 +19,6 @@ export const NativeCompanion = {
   startVoiceEngine: (config) => invoke("start_voice_engine", { config }),
   stopVoiceEngine: () => invoke("stop_voice_engine"),
   getAudioStatus: () => invoke("get_audio_status"),
+  testHotkey: (bindingId, mode) => invoke("test_hotkey_action", { bindingId, mode }),
+  openExternal: (url) => invoke("open_external", { url }),
 };

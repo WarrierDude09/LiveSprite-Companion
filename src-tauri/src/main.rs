@@ -5,7 +5,7 @@ mod audio;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs, path::PathBuf, sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex}, time::Duration};
-use tauri::{menu::{Menu, MenuItem}, tray::{TrayIconBuilder, TrayIconEvent}, AppHandle, Manager, State, WindowEvent};
+use tauri::{menu::{Menu, MenuItem}, tray::{TrayIconBuilder, TrayIconEvent}, AppHandle, Emitter, Manager, State, WindowEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as AutostartExt};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use audio::{AudioEngine, AudioStatus, VoiceConfig};
@@ -51,6 +51,7 @@ struct AppState {
     config:Mutex<CompanionConfig>, config_path:PathBuf, bindings:Mutex<HashMap<u32,Binding>>,
     conflicts:Mutex<Vec<String>>, registered_count:Mutex<usize>, paused:AtomicBool,
     syncing:AtomicBool, synced:AtomicBool, client:Client,
+    event_lock:tokio::sync::Mutex<()>,
     status_item:Mutex<Option<MenuItem<tauri::Wry>>>, project_item:Mutex<Option<MenuItem<tauri::Wry>>>,
     pause_item:Mutex<Option<MenuItem<tauri::Wry>>>, autostart_item:Mutex<Option<MenuItem<tauri::Wry>>>,
     audio: AudioEngine,
@@ -97,6 +98,15 @@ fn disconnect_companion(app:AppHandle,state:State<'_,Arc<AppState>>)->Result<(),
 #[tauri::command] fn start_voice_engine(app:AppHandle,state:State<'_,Arc<AppState>>,config:VoiceConfig)->Result<(),String>{state.audio.start(config,app)}
 #[tauri::command] fn stop_voice_engine(state:State<'_,Arc<AppState>>){state.audio.stop()}
 #[tauri::command] fn get_audio_status(state:State<'_,Arc<AppState>>)->AudioStatus{state.audio.status()}
+#[tauri::command]
+fn open_external(url:String)->Result<(),String>{let parsed=reqwest::Url::parse(&url).map_err(|_|"Invalid URL".to_string())?;if parsed.scheme()!="https"||parsed.host_str()!=Some("live-png-flow.base44.app")||!parsed.path().starts_with("/live/"){return Err("Only LiveSprite streaming preview links can be opened.".into())}open::that_detached(parsed.as_str()).map_err(|e|e.to_string())}
+#[tauri::command]
+async fn test_hotkey_action(app:AppHandle,state:State<'_,Arc<AppState>>,binding_id:String,mode:String)->Result<(),String>{
+    if binding_id.trim().is_empty(){return Err("Select a valid hotkey action first.".into())}
+    send_binding_event(&app,state.inner(),binding_id.trim(),false).await?;
+    if mode.eq_ignore_ascii_case("hold"){send_binding_event(&app,state.inner(),binding_id.trim(),true).await?}
+    Ok(())
+}
 
 fn load_config(path:&PathBuf)->CompanionConfig{fs::read_to_string(path).ok().and_then(|v|serde_json::from_str(&v).ok()).unwrap_or_default()}
 fn save_config(path:&PathBuf,c:&CompanionConfig)->Result<(),String>{if let Some(p)=path.parent(){fs::create_dir_all(p).map_err(|e|e.to_string())?}fs::write(path,serde_json::to_string_pretty(c).map_err(|e|e.to_string())?).map_err(|e|e.to_string())}
@@ -121,15 +131,16 @@ async fn sync_and_register(app:&AppHandle,state:Arc<AppState>)->Result<PairResul
 }
 
 fn to_accelerator(binding:&Binding)->Result<String,String>{
-    let mut p=Vec::new();for m in ["ctrl","shift","alt"]{if binding.modifiers.iter().any(|v|v.eq_ignore_ascii_case(m)){p.push(match m{"ctrl"=>"Control","shift"=>"Shift",_=>"Alt"}.to_owned())}}
+    let mut p=Vec::new();for m in ["ctrl","shift","alt","super"]{if binding.modifiers.iter().any(|v|v.eq_ignore_ascii_case(m)||m=="super"&&(v.eq_ignore_ascii_case("meta")||v.eq_ignore_ascii_case("command")||v.eq_ignore_ascii_case("win"))){p.push(match m{"ctrl"=>"Control","shift"=>"Shift","alt"=>"Alt",_=>"Super"}.to_owned())}}
     let raw=binding.key.trim();let upper=raw.to_ascii_uppercase();let key=if upper.len()==1&&upper.as_bytes()[0].is_ascii_alphabetic(){format!("Key{upper}")}
     else if upper.len()==1&&upper.as_bytes()[0].is_ascii_digit(){format!("Digit{upper}")}
-    else if upper.starts_with('F')&&upper[1..].parse::<u8>().is_ok_and(|n|(1..=12).contains(&n)){upper}
-    else{match upper.as_str(){"SPACE"=>"Space","ENTER"|"RETURN"=>"Enter","ESC"|"ESCAPE"=>"Escape","TAB"=>"Tab","BACKSPACE"=>"Backspace","DELETE"=>"Delete","INSERT"=>"Insert","HOME"=>"Home","END"=>"End","PAGEUP"=>"PageUp","PAGEDOWN"=>"PageDown","UP"|"ARROWUP"=>"ArrowUp","DOWN"|"ARROWDOWN"=>"ArrowDown","LEFT"|"ARROWLEFT"=>"ArrowLeft","RIGHT"|"ARROWRIGHT"=>"ArrowRight",_=>return Err(format!("Unsupported key: {raw}"))}.to_owned()};p.push(key);Ok(p.join("+"))
+    else if upper.starts_with('F')&&upper[1..].parse::<u8>().is_ok_and(|n|(1..=24).contains(&n)){upper}
+    else{match upper.as_str(){"SPACE"=>"Space","ENTER"|"RETURN"=>"Enter","ESC"|"ESCAPE"=>"Escape","TAB"=>"Tab","BACKSPACE"=>"Backspace","DELETE"=>"Delete","INSERT"=>"Insert","HOME"=>"Home","END"=>"End","PAGEUP"=>"PageUp","PAGEDOWN"=>"PageDown","UP"|"ARROWUP"=>"ArrowUp","DOWN"|"ARROWDOWN"=>"ArrowDown","LEFT"|"ARROWLEFT"=>"ArrowLeft","RIGHT"|"ARROWRIGHT"=>"ArrowRight","BACKQUOTE"=>"Backquote","MINUS"=>"Minus","EQUAL"=>"Equal","BRACKETLEFT"=>"BracketLeft","BRACKETRIGHT"=>"BracketRight","BACKSLASH"=>"Backslash","SEMICOLON"=>"Semicolon","QUOTE"=>"Quote","COMMA"=>"Comma","PERIOD"=>"Period","SLASH"=>"Slash","NUMPAD0"=>"Numpad0","NUMPAD1"=>"Numpad1","NUMPAD2"=>"Numpad2","NUMPAD3"=>"Numpad3","NUMPAD4"=>"Numpad4","NUMPAD5"=>"Numpad5","NUMPAD6"=>"Numpad6","NUMPAD7"=>"Numpad7","NUMPAD8"=>"Numpad8","NUMPAD9"=>"Numpad9","NUMPADADD"=>"NumpadAdd","NUMPADSUBTRACT"=>"NumpadSubtract","NUMPADMULTIPLY"=>"NumpadMultiply","NUMPADDIVIDE"=>"NumpadDivide","NUMPADDECIMAL"=>"NumpadDecimal",_=>return Err(format!("Unsupported key: {raw}"))}.to_owned()};p.push(key);Ok(p.join("+"))
 }
+async fn send_binding_event(app:&AppHandle,state:&Arc<AppState>,binding_id:&str,release:bool)->Result<(),String>{let _order=state.event_lock.lock().await;let c=state.config();let result:Result<serde_json::Value,String>=post(&state.client,&c.gateway_url,serde_json::json!({"action":"event","pairToken":c.pair_token,"bindingId":binding_id,"release":release})).await;if let Err(reason)=&result{let _=app.emit("native-error",format!("Hotkey action failed: {reason}"));}result.map(|_|())}
 fn dispatch(app:&AppHandle,shortcut:&Shortcut,event:ShortcutState){let state=app.state::<Arc<AppState>>().inner().clone();if state.paused.load(Ordering::Acquire)||!state.synced.load(Ordering::Acquire){return}
-    let binding=state.bindings.lock().ok().and_then(|v|v.get(&shortcut.id()).cloned());let Some(binding)=binding else{return};let release=matches!(event,ShortcutState::Released);if release&&binding.mode!="hold"{return}let c=state.config();
-    tauri::async_runtime::spawn(async move{let _:Result<serde_json::Value,String>=post(&state.client,&c.gateway_url,serde_json::json!({"action":"event","pairToken":c.pair_token,"bindingId":binding.id,"release":release})).await;});}
+    let binding=state.bindings.lock().ok().and_then(|v|v.get(&shortcut.id()).cloned());let Some(binding)=binding else{return};let release=matches!(event,ShortcutState::Released);if release&&binding.mode!="hold"{return}
+    let app=app.clone();tauri::async_runtime::spawn(async move{let _=send_binding_event(&app,&state,&binding.id,release).await;});}
 
 fn update_status(s: &AppState, text: &str) {
     if let Ok(item) = s.status_item.lock() {
@@ -195,10 +206,10 @@ fn main(){tauri::Builder::default()
     .plugin(tauri_plugin_single_instance::init(|app,_args,_cwd|{let _=show_main(app);}))
     .plugin(tauri_plugin_opener::init()).plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent,None))
     .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app,shortcut,event|dispatch(app,shortcut,event.state())).build())
-    .invoke_handler(tauri::generate_handler![get_companion_status,activate_project_pairing,resync_hotkeys,set_hotkeys_paused,set_autostart,disconnect_companion,show_main_window,exit_application,list_microphones,start_voice_engine,stop_voice_engine,get_audio_status])
+    .invoke_handler(tauri::generate_handler![get_companion_status,activate_project_pairing,resync_hotkeys,set_hotkeys_paused,set_autostart,disconnect_companion,show_main_window,exit_application,list_microphones,start_voice_engine,stop_voice_engine,get_audio_status,test_hotkey_action,open_external])
     .on_window_event(|window,event|{if window.label()=="main"{if let WindowEvent::CloseRequested{api,..}=event{if window.state::<Arc<AppState>>().config().close_to_tray{api.prevent_close();let _=window.hide();}}}})
     .setup(|app|{let path=app.path().app_config_dir()?.join("companion.json");let mut c=load_config(&path);let auto=app.autolaunch().is_enabled().unwrap_or(c.start_with_os);c.start_with_os=auto;let _=save_config(&path,&c);
-        let s=Arc::new(AppState{config:Mutex::new(c.clone()),config_path:path,bindings:Mutex::new(HashMap::new()),conflicts:Mutex::new(Vec::new()),registered_count:Mutex::new(0),paused:AtomicBool::new(false),syncing:AtomicBool::new(false),synced:AtomicBool::new(false),client:Client::builder().timeout(Duration::from_secs(8)).build()?,status_item:Mutex::new(None),project_item:Mutex::new(None),pause_item:Mutex::new(None),autostart_item:Mutex::new(None),audio:AudioEngine::default()});app.manage(s.clone());
+        let s=Arc::new(AppState{config:Mutex::new(c.clone()),config_path:path,bindings:Mutex::new(HashMap::new()),conflicts:Mutex::new(Vec::new()),registered_count:Mutex::new(0),paused:AtomicBool::new(false),syncing:AtomicBool::new(false),synced:AtomicBool::new(false),client:Client::builder().timeout(Duration::from_secs(8)).build()?,event_lock:tokio::sync::Mutex::new(()),status_item:Mutex::new(None),project_item:Mutex::new(None),pause_item:Mutex::new(None),autostart_item:Mutex::new(None),audio:AudioEngine::default()});app.manage(s.clone());
         let status=MenuItem::with_id(app,"status",if c.pair_token.is_empty(){"Status: Not paired"}else{"Status: Disconnected"},false,None::<&str>)?;let project=MenuItem::with_id(app,"project",if c.active_project_name.is_empty(){"Active Project: None".into()}else{format!("Active Project: {}",c.active_project_name)},false,None::<&str>)?;
         let open=MenuItem::with_id(app,"open","Open LiveSprite",true,None::<&str>)?;let pause=MenuItem::with_id(app,"pause","Pause Hotkeys",true,None::<&str>)?;let resync=MenuItem::with_id(app,"resync","Re-sync Hotkeys",true,None::<&str>)?;let autostart=MenuItem::with_id(app,"autostart",if auto{"Disable autostart"}else{"Start with OS"},true,None::<&str>)?;let exit=MenuItem::with_id(app,"exit","Exit LiveSprite",true,None::<&str>)?;
         let menu=Menu::with_items(app,&[&status,&project,&open,&pause,&resync,&autostart,&exit])?;*s.status_item.lock().expect("status lock")=Some(status);*s.project_item.lock().expect("project lock")=Some(project);*s.pause_item.lock().expect("pause lock")=Some(pause);*s.autostart_item.lock().expect("autostart lock")=Some(autostart);
@@ -209,4 +220,4 @@ fn main(){tauri::Builder::default()
     .run(tauri::generate_context!()).expect("error while running LiveSprite")}
 
 #[cfg(test)]mod tests{use super::*;fn b(key:&str,m:&[&str])->Binding{Binding{id:"id".into(),action_type:"expression".into(),action:"x".into(),target_id:"t".into(),target_name:"T".into(),key:key.into(),modifiers:m.iter().map(|v|v.to_string()).collect(),mode:"press".into(),enabled:true}}
-#[test]fn accelerators(){assert_eq!(to_accelerator(&b("B",&["alt","ctrl","shift"])).unwrap(),"Control+Shift+Alt+KeyB");assert_eq!(to_accelerator(&b("1",&[])).unwrap(),"Digit1");assert_eq!(to_accelerator(&b("F12",&[])).unwrap(),"F12")}}
+#[test]fn accelerators(){assert_eq!(to_accelerator(&b("B",&["alt","ctrl","shift"])).unwrap(),"Control+Shift+Alt+KeyB");assert_eq!(to_accelerator(&b("1",&[])).unwrap(),"Digit1");assert_eq!(to_accelerator(&b("F24",&[])).unwrap(),"F24");assert_eq!(to_accelerator(&b("NumpadAdd",&["super"])).unwrap(),"Super+NumpadAdd")}}

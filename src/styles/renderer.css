@@ -1,0 +1,22 @@
+.character-renderer-error,
+.character-renderer-empty {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 7px;
+  min-height: 120px;
+  padding: 20px;
+  color: #9298b3;
+  text-align: center;
+}
+
+.character-renderer-error strong { color: #ffb7c2; }
+.character-renderer-error span { max-width: 520px; overflow-wrap: anywhere; font-size: 11px; }
+.character-renderer-error button { margin-top: 5px; }
+.project-art { overflow: hidden; }
+.project-art img { width: 100%; height: 100%; object-fit: contain; }
+.project-art .character-renderer-error { min-height: 0; padding: 4px; font-size: 0; }
+.project-art .character-renderer-error span,
+.project-art .character-renderer-error button { display: none; }
+.dashboard-character { width: 250px; height: 190px; display: grid; place-items: center; overflow: hidden; }
+.dashboard-character img { max-width: 100%; max-height: 100%; object-fit: contain; }

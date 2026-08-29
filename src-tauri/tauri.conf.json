@@ -26,7 +26,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost https://base44.app https://*.base44.app wss://*.base44.app; img-src 'self' asset: https://asset.localhost https://media.base44.com https://*.base44.app data: blob:; font-src 'self' data:; media-src 'self' https://media.base44.com https://*.base44.app blob:"
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost https://base44.app https://*.base44.app wss://*.base44.app; img-src 'self' asset: https://asset.localhost https: data: blob:; font-src 'self' data:; media-src 'self' https: blob:"
     }
   },
   "bundle": {
@@ -34,6 +34,12 @@
     "targets": "all",
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icon.icns", "icon.ico"],
     "shortDescription": "The native LiveSprite desktop application",
-    "longDescription": "Use your LiveSprite account and projects with native global hotkeys, background operation, tray controls, and autostart."
+    "longDescription": "LiveSprite — Bring Your Character to Life. Configure your artwork, voice detection, expressions, streaming source, and native global hotkeys.",
+    "windows": {
+      "nsis": {
+        "installMode": "both",
+        "displayLanguageSelector": false
+      }
+    }
   }
 }

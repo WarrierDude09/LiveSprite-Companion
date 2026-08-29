@@ -3,6 +3,11 @@ import { LiveSpriteAPI } from "./api/liveSpriteApi";
 import { NativeCompanion } from "./native/companion";
 import Studio from "./pages/Studio";
 import LiveStudio from "./pages/LiveStudio";
+import CharacterRenderer, { resolveAssetUrl, safeAssetLabel } from "./components/CharacterRenderer";
+import HotkeysPage from "./pages/HotkeysPage";
+import StreamingSetup from "./pages/StreamingSetup";
+import { resolveArtwork, validateCoreStates } from "./runtime/stateResolver";
+import { listen } from "@tauri-apps/api/event";
 
 const GATEWAY_URL = "https://live-png-flow.base44.app/functions/CompanionGateway";
 
@@ -87,18 +92,18 @@ function StatusBadge({ status }) {
 }
 
 function Sidebar({ page, setPage, user, account, onLogout }) {
-  const items = [["dashboard","Dashboard"],["projects","Projects"],["studio","Studio"],["hotkeys","Hotkeys"],["live","Live"],["diagnostics","Diagnostics"],["settings","Settings"]];
+  const items = [["dashboard","Dashboard"],["projects","Projects"],["studio","Studio"],["hotkeys","Hotkeys"],["live","Live"],["streaming","Streaming"],["diagnostics","Diagnostics"],["settings","Settings"]];
   return <aside className="sidebar"><div className="sidebar-brand"><span>✦</span> LiveSprite</div><nav>{items.map(([id,label]) => <button key={id} className={page === id ? "active" : ""} onClick={() => setPage(id)}>{label}</button>)}</nav><div className="account-chip"><div className="avatar">{(account?.username || user?.email || "L")[0].toUpperCase()}</div><div><strong>{account?.username || "LiveSprite user"}</strong><small>{user?.email}</small></div><button title="Log out" onClick={onLogout}>↪</button></div></aside>;
 }
 
 function Dashboard({ account, projects, selected, nativeStatus, setPage, onSelect }) {
-  return <><header className="page-header"><div><h1>Welcome back{account?.username ? `, ${account.username}` : ""}</h1><p>Your LiveSprite characters and native Companion are ready.</p></div><StatusBadge status={nativeStatus} /></header><div className="metric-grid"><article><small>Characters</small><strong>{projects.length}</strong><span>Synced with LiveSprite</span></article><article><small>Native hotkeys</small><strong>{nativeStatus?.registeredCount ?? 0}</strong><span>{nativeStatus?.conflicts?.length ? `${nativeStatus.conflicts.length} conflicts` : "No conflicts"}</span></article><article><small>Active project</small><strong className="project-metric">{nativeStatus?.activeProjectName || "None"}</strong><span>{nativeStatus?.paired ? "Native pairing saved" : "Choose a project"}</span></article></div><section className="panel hero-panel"><div><span className="eyebrow">ACTIVE CHARACTER</span><h2>{selected?.name || "Choose a LiveSprite project"}</h2><p>{selected?.description || "Select a character to manage its studio data and native global hotkeys."}</p><div className="actions"><button className="primary compact" onClick={() => setPage("projects")}>{selected ? "Open Project" : "View Projects"}</button>{selected && <button className="secondary compact" onClick={() => onSelect(selected)}>Refresh</button>}</div></div><div className="spark-orbit">✦</div></section></>;
+  return <><header className="page-header"><div><h1>Welcome back{account?.username ? `, ${account.username}` : ""}</h1><p>Your LiveSprite characters and native Companion are ready.</p></div><StatusBadge status={nativeStatus} /></header><div className="metric-grid"><article><small>Characters</small><strong>{projects.length}</strong><span>Synced with LiveSprite</span></article><article><small>Native hotkeys</small><strong>{nativeStatus?.registeredCount ?? 0}</strong><span>{nativeStatus?.conflicts?.length ? `${nativeStatus.conflicts.length} conflicts` : "No conflicts"}</span></article><article><small>Active project</small><strong className="project-metric">{nativeStatus?.activeProjectName || "None"}</strong><span>{nativeStatus?.paired ? "Native pairing saved" : "Choose a project"}</span></article></div><section className="panel hero-panel"><div><span className="eyebrow">ACTIVE CHARACTER</span><h2>{selected?.name || "Choose a LiveSprite project"}</h2><p>{selected?.description || "Select a character to manage its studio data and native global hotkeys."}</p><div className="actions"><button className="primary compact" onClick={() => setPage("projects")}>{selected ? "Open Project" : "View Projects"}</button>{selected && <button className="secondary compact" onClick={() => onSelect(selected)}>Refresh</button>}</div></div>{selected?.thumbnailUrl?<div className="dashboard-character"><CharacterRenderer asset={{id:`${selected.id}:thumbnail`,displayName:selected.name,fileUrl:selected.thumbnailUrl}} /></div>:<div className="spark-orbit">✦</div>}</section></>;
 }
 
 function Projects({ projects, selected, selectProject, refresh, createProject }) {
   const [creating, setCreating] = useState(false); const [name,setName]=useState(""); const [description,setDescription]=useState(""); const [busy,setBusy]=useState(false);
   const submit=async e=>{e.preventDefault();setBusy(true);try{const project=await createProject(name,description);setName("");setDescription("");setCreating(false);selectProject(project);}finally{setBusy(false)}};
-  return <><header className="page-header"><div><h1>My Characters</h1><p>These are the same projects available on the LiveSprite website.</p></div><button className="primary compact" onClick={() => setCreating(!creating)}>+ Create Character</button></header>{creating && <form className="panel create-form" onSubmit={submit}><label>Name<input value={name} onChange={e=>setName(e.target.value)} required /></label><label>Description<input value={description} onChange={e=>setDescription(e.target.value)} /></label><button className="primary compact" disabled={busy}>{busy?"Creating…":"Create"}</button></form>}<div className="project-grid">{projects.map(project=><article key={project.id} className={`project-card ${selected?.id===project.id?"selected":""}`}><div className="project-art">✦</div><div><h2>{project.name}</h2><p>{project.description || "LiveSprite character"}</p><small>{project.initialSetupCompleted ? "Studio configured" : "Setup in progress"}</small></div><button className="secondary compact" onClick={()=>selectProject(project)}>Open</button></article>)}</div>{!projects.length && <section className="panel empty"><div className="brand-mark">✦</div><h2>No Projects Yet</h2><p>Create your first LiveSprite character. It will also appear on the website.</p><button className="primary compact" onClick={()=>setCreating(true)}>Create Project</button></section>}<button className="link refresh" onClick={refresh}>Refresh projects</button></>;
+  return <><header className="page-header"><div><h1>My Characters</h1><p>These are the same projects available on the LiveSprite website.</p></div><button className="primary compact" onClick={() => setCreating(!creating)}>+ Create Character</button></header>{creating && <form className="panel create-form" onSubmit={submit}><label>Name<input value={name} onChange={e=>setName(e.target.value)} required /></label><label>Description<input value={description} onChange={e=>setDescription(e.target.value)} /></label><button className="primary compact" disabled={busy}>{busy?"Creating…":"Create"}</button></form>}<div className="project-grid">{projects.map(project=><article key={project.id} className={`project-card ${selected?.id===project.id?"selected":""}`}>{project.thumbnailUrl?<div className="project-art"><CharacterRenderer asset={{id:`${project.id}:thumbnail`,displayName:project.name,fileUrl:project.thumbnailUrl}} /></div>:<div className="project-art">✦</div>}<div><h2>{project.name}</h2><p>{project.description || "LiveSprite character"}</p><small>{project.initialSetupCompleted ? "Studio configured" : "Setup in progress"}</small></div><button className="secondary compact" onClick={()=>selectProject(project)}>Open</button></article>)}</div>{!projects.length && <section className="panel empty"><div className="brand-mark">✦</div><h2>No Projects Yet</h2><p>Create your first LiveSprite character. It will also appear on the website.</p><button className="primary compact" onClick={()=>setCreating(true)}>Create Project</button></section>}<button className="link refresh" onClick={refresh}>Refresh projects</button></>;
 }
 
 function ProjectOverview({ details, saveProject, activate, activating, nativeStatus }) {
@@ -129,12 +134,21 @@ function ChooseUsername({ user, onComplete }) {
 
 function Diagnostics({ user, details, nativeStatus }) {
   const [audio,setAudio]=useState(null);useEffect(()=>{const read=()=>NativeCompanion.getAudioStatus().then(setAudio).catch(()=>setAudio(null));read();const timer=setInterval(read,500);return()=>clearInterval(timer)},[]);
+  const [imageCheck,setImageCheck]=useState({status:"Not tested",reason:""});const [copied,setCopied]=useState(false);
   const session=details?.sessions?.find((item)=>item.active);
+  const core=validateCoreStates(details?.states);const resolved=details?resolveArtwork({expressionId:session?.currentExpressionId||"",voiceState:session?.currentBaseState||"idle",blinking:Boolean(session?.isBlinking),assignments:details.states,assets:details.assets}):null;
+  useEffect(()=>{const source=resolveAssetUrl(resolved?.asset?.fileUrl);if(!source){setImageCheck({status:resolved?"Failed":"No resolved asset",reason:resolved?"Invalid asset URL":""});return}let active=true;const image=new Image();image.onload=()=>{if(active)setImageCheck({status:`Success · ${image.naturalWidth}×${image.naturalHeight}`,reason:""})};image.onerror=()=>{if(active)setImageCheck({status:"Failed",reason:"WebView fetch or image decode failed"})};image.src=source;return()=>{active=false}},[resolved?.asset?.id,resolved?.asset?.fileUrl]);
   const rows=[
     ["Backend API",details?"Connected":"No project loaded"],
     ["Authentication",user?.id?"Valid":"Unavailable"],
     ["Project Sync",details?"Working":"Inactive"],
     ["Expressions in Database",details?String(details.expressions.length):"—"],
+    ["Idle State",core.idle?"Found":"Missing"],
+    ["Talking State",core.talking?"Found":"Missing"],
+    ["Resolved PNG State",resolved?.stateType||"None"],
+    ["Resolved Asset",resolved?.asset?.id||"None"],
+    ["Asset URL",resolved?safeAssetLabel(resolved.asset.fileUrl):"Unavailable"],
+    ["Asset Fetch / Decode",imageCheck.reason?`${imageCheck.status} · ${imageCheck.reason}`:imageCheck.status],
     ["Current Expression ID",session?.currentExpressionId||"Normal"],
     ["Microphone",audio?.running?`Connected · ${audio.deviceName}`:"Stopped"],
     ["Voice State",audio?.running?`${audio.voiceState} · ${audio.levelDb.toFixed(1)} dB`:"Inactive"],
@@ -143,7 +157,8 @@ function Diagnostics({ user, details, nativeStatus }) {
     ["Live Session",session?"Active":"Stopped"],
     ["App Version",nativeStatus?.version||"Unknown"],
   ];
-  return <><header className="page-header"><div><h1>Diagnostics</h1><p>Current native and backend state—no simulated health indicators.</p></div></header><section className="panel"><div className="data-list">{rows.map(([label,value])=><div key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>{nativeStatus?.conflicts?.length>0&&<div className="warning-panel"><strong>Hotkey conflicts</strong>{nativeStatus.conflicts.map((item)=><span key={item}>{item}</span>)}</div>}</section></>;
+  const copy=async()=>{const report=rows.map(([label,value])=>`${label}: ${value}`).join("\n")+`\nHotkey conflicts: ${(nativeStatus?.conflicts||[]).join(" | ")||"None"}`;try{await navigator.clipboard.writeText(report);setCopied(true);setTimeout(()=>setCopied(false),1800)}catch{setCopied(false)}};
+  return <><header className="page-header"><div><h1>Diagnostics</h1><p>Current native and backend state—no simulated health indicators.</p></div><button className="secondary compact" onClick={copy}>{copied?"Copied!":"Copy Diagnostic Report"}</button></header><section className="panel"><div className="data-list">{rows.map(([label,value])=><div key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>{nativeStatus?.conflicts?.length>0&&<div className="warning-panel"><strong>Hotkey conflicts</strong>{nativeStatus.conflicts.map((item)=><span key={item}>{item}</span>)}</div>}</section></>;
 }
 
 export default function App() {
@@ -183,6 +198,7 @@ export default function App() {
     }
   }, [loadProjects, refreshNative]);
   useEffect(()=>{restore()},[restore]);
+  useEffect(()=>{let stop;listen("native-error",({payload})=>setError(String(payload||"A native operation failed."))).then((unlisten)=>{stop=unlisten});return()=>{if(stop)stop()}},[]);
   useEffect(()=>{const timer=setInterval(refreshNative,5000);return()=>clearInterval(timer)},[refreshNative]);
   useEffect(()=>{let cancelled=false;if(!selected){setDetails(null);return}LiveSpriteAPI.projectDetails(selected.id).then(value=>{if(!cancelled)setDetails(value)}).catch(reason=>setError(reason?.message||"Unable to load project."));return()=>{cancelled=true}},[selected]);
   useEffect(()=>{if(!selected)return;let timer;const stop=LiveSpriteAPI.realtime.subscribeProject(selected.id,()=>{clearTimeout(timer);timer=setTimeout(reloadDetails,150)});return()=>{clearTimeout(timer);stop()}},[selected,reloadDetails]);
@@ -194,7 +210,7 @@ export default function App() {
   const resync=async()=>{try{await NativeCompanion.resync();await refreshNative()}catch(reason){setError(String(reason))}};
   const setAutostart=async enabled=>{try{await NativeCompanion.setAutostart(enabled);await refreshNative()}catch(reason){setError(String(reason))}};
   const disconnect=async()=>{await NativeCompanion.disconnect();await refreshNative()};
-  const content=useMemo(()=>{if(page==="dashboard")return <Dashboard account={account} projects={projects} selected={selected} nativeStatus={nativeStatus} setPage={setPage} onSelect={setSelected}/>;if(page==="projects")return <><Projects projects={projects} selected={selected} selectProject={project=>{setSelected(project)}} refresh={loadProjects} createProject={createProject}/>{selected&&<ProjectOverview details={details} saveProject={saveProject} activate={activate} activating={activating} nativeStatus={nativeStatus}/>}</>;if(page==="studio")return <Studio details={details} reload={reloadDetails} reportError={setError}/>;if(page==="hotkeys")return <Hotkeys details={details} nativeStatus={nativeStatus} resync={resync} setPaused={setPaused}/>;if(page==="live")return <LiveStudio details={details} reload={reloadDetails} reportError={setError}/>;if(page==="diagnostics")return <Diagnostics user={user} details={details} nativeStatus={nativeStatus}/>;return <Settings user={user} account={account} nativeStatus={nativeStatus} setAutostart={setAutostart} disconnect={disconnect}/>},[page,account,projects,selected,nativeStatus,details,activating,reloadDetails]);
+  const content=useMemo(()=>{if(page==="dashboard")return <Dashboard account={account} projects={projects} selected={selected} nativeStatus={nativeStatus} setPage={setPage} onSelect={setSelected}/>;if(page==="projects")return <><Projects projects={projects} selected={selected} selectProject={project=>{setSelected(project)}} refresh={loadProjects} createProject={createProject}/>{selected&&<ProjectOverview details={details} saveProject={saveProject} activate={activate} activating={activating} nativeStatus={nativeStatus}/>}</>;if(page==="studio")return <Studio details={details} reload={reloadDetails} reportError={setError}/>;if(page==="hotkeys")return <HotkeysPage details={details} nativeStatus={nativeStatus} reload={reloadDetails} resync={resync} setPaused={setPaused} reportError={setError}/>;if(page==="live")return <LiveStudio details={details} reload={reloadDetails} reportError={setError}/>;if(page==="streaming")return <StreamingSetup details={details} reload={reloadDetails} reportError={setError}/>;if(page==="diagnostics")return <Diagnostics user={user} details={details} nativeStatus={nativeStatus}/>;return <Settings user={user} account={account} nativeStatus={nativeStatus} setAutostart={setAutostart} disconnect={disconnect}/>},[page,account,projects,selected,nativeStatus,details,activating,reloadDetails]);
   if(state==="starting")return <Spinner/>;
   if(state==="offline")return <ErrorState title="LiveSprite is Offline" message={`${error} Your native Companion is still running in the background.`} onRetry={restore}/>;
   if(state==="onboarding")return <ChooseUsername user={user} onComplete={restore}/>;

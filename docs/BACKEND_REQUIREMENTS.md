@@ -23,3 +23,15 @@ Codes must be hashed at rest, single-use, account-bound, device-flow-bound, audi
 The native engine detects Idle/Talking/Yelling locally. The authenticated frontend currently writes transitions to the existing `LiveSession` entity. For guaranteed delivery while the WebView is suspended, add a narrowly scoped CompanionGateway action authorized by the existing project pair token, such as `voiceState`, accepting only `idle`, `talking`, or `yelling` and updating only the paired project's active Live Session.
 
 No service-role credential belongs in Desktop.
+
+## Signed desktop updater
+
+Tauri refuses unsigned updates, so the updater cannot be enabled safely without release-owner key material. Production setup requires:
+
+1. Generate a Tauri updater signing keypair outside this repository.
+2. Store the private key and optional password as GitHub Actions secrets named `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
+3. Add the public key to `plugins.updater.pubkey` in `tauri.conf.json`.
+4. Generate signed update bundles and a complete `latest.json` for Windows, macOS, and Linux.
+5. Test an installed version A updating to version B before enabling updater controls.
+
+No unsigned or placeholder updater endpoint is bundled.

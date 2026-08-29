@@ -45,6 +45,10 @@ jobs:
         if: matrix.platform == 'windows-latest'
         shell: pwsh
         run: Copy-Item (Get-ChildItem src-tauri/target/release/bundle/msi/*.msi | Select-Object -First 1) "${{ matrix.artifact }}"
+      - name: Stage Windows setup executable
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: Copy-Item (Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1) "LiveSprite-Windows-x64-Setup.exe"
       - name: Stage macOS bundle
         if: matrix.platform == 'macos-latest'
         run: cp "$(find src-tauri/target/release/bundle/dmg -name '*.dmg' -print -quit)" "${{ matrix.artifact }}"
@@ -56,6 +60,11 @@ jobs:
         with:
           name: ${{ github.ref_name }}
           files: ${{ matrix.artifact }}
+      - uses: softprops/action-gh-release@v2
+        if: success() && matrix.platform == 'windows-latest'
+        with:
+          name: ${{ github.ref_name }}
+          files: LiveSprite-Windows-x64-Setup.exe
       - name: Publish failure diagnostics
         if: failure() && steps.app-build.outcome == 'failure'
         uses: softprops/action-gh-release@v2
