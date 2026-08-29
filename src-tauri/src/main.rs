@@ -2,592 +2,155 @@
 
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashMap,
-    fs,
-    path::PathBuf,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
-    },
-    time::Duration,
-};
-use tauri::{
-    menu::{Menu, MenuItem},
-    tray::TrayIconBuilder,
-    AppHandle, Manager, State, WebviewWindow,
-};
+use std::{collections::HashMap, fs, path::PathBuf, sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex}, time::Duration};
+use tauri::{menu::{Menu, MenuItem}, tray::{TrayIconBuilder, TrayIconEvent}, AppHandle, Manager, State, WindowEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as AutostartExt};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
-use tauri_plugin_opener::OpenerExt;
 
-const DEFAULT_GATEWAY: &str =
-    "https://live-png-flow.base44.app/functions/CompanionGateway";
-const LIVE_SPRITE_URL: &str = "https://live-png-flow.base44.app";
-const VERSION: &str = "1.0.0";
-const TRAY_ID: &str = "main-tray";
+const DEFAULT_GATEWAY: &str = "https://live-png-flow.base44.app/functions/CompanionGateway";
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CompanionConfig {
-    #[serde(default)]
-    pair_token: String,
-    #[serde(default = "default_gateway")]
-    gateway_url: String,
-    #[serde(default)]
-    start_with_os: bool,
+    #[serde(default)] pair_token: String,
+    #[serde(default = "default_gateway")] gateway_url: String,
+    #[serde(default)] start_with_os: bool,
+    #[serde(default)] active_project_id: String,
+    #[serde(default)] active_project_name: String,
+    #[serde(default = "default_true")] close_to_tray: bool,
 }
+impl Default for CompanionConfig { fn default() -> Self { Self { pair_token:String::new(), gateway_url:default_gateway(), start_with_os:false, active_project_id:String::new(), active_project_name:String::new(), close_to_tray:true } } }
+fn default_gateway() -> String { DEFAULT_GATEWAY.into() }
+fn default_true() -> bool { true }
 
-impl Default for CompanionConfig {
-    fn default() -> Self {
-        Self {
-            pair_token: String::new(),
-            gateway_url: default_gateway(),
-            start_with_os: false,
-        }
-    }
-}
-
-fn default_gateway() -> String {
-    DEFAULT_GATEWAY.to_owned()
-}
-
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Binding {
-    id: String,
-    #[allow(dead_code)]
-    action_type: String,
-    #[allow(dead_code)]
-    action: String,
-    #[allow(dead_code)]
-    target_id: String,
-    #[allow(dead_code)]
-    target_name: String,
-    key: String,
-    #[serde(default)]
-    modifiers: Vec<String>,
-    mode: String,
-    enabled: bool,
+    id:String, #[allow(dead_code)] action_type:String, #[allow(dead_code)] action:String,
+    #[allow(dead_code)] target_id:String, #[allow(dead_code)] target_name:String,
+    key:String, #[serde(default)] modifiers:Vec<String>, mode:String, enabled:bool,
 }
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SyncResponse {
-    bindings: Vec<Binding>,
-    #[serde(default)]
-    hotkeys_paused: bool,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct HeartbeatResponse {
-    #[allow(dead_code)]
-    ok: bool,
-    #[serde(default)]
-    hotkeys_paused: bool,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PairingConfigView {
-    pair_token: String,
-    gateway_url: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PairResult {
-    registered_count: usize,
-    conflicts: Vec<String>,
+#[derive(Deserialize)] #[serde(rename_all="camelCase")]
+struct SyncResponse { bindings:Vec<Binding>, #[serde(default)] hotkeys_paused:bool }
+#[derive(Deserialize)] #[serde(rename_all="camelCase")]
+struct HeartbeatResponse { #[allow(dead_code)] ok:bool, #[serde(default)] hotkeys_paused:bool }
+#[derive(Serialize)] #[serde(rename_all="camelCase")]
+struct PairResult { registered_count:usize, conflicts:Vec<String> }
+#[derive(Serialize)] #[serde(rename_all="camelCase")]
+struct CompanionStatus {
+    paired:bool, connected:bool, paused:bool, registered_count:usize, conflicts:Vec<String>,
+    gateway_url:String, autostart:bool, close_to_tray:bool, version:&'static str,
+    active_project_id:String, active_project_name:String,
 }
 
 struct AppState {
-    config: Mutex<CompanionConfig>,
-    config_path: PathBuf,
-    bindings: Mutex<HashMap<u32, Binding>>,
-    conflicts: Mutex<Vec<String>>,
-    registered_count: Mutex<usize>,
-    paused: AtomicBool,
-    syncing: AtomicBool,
-    synced: AtomicBool,
-    client: Client,
-    status_item: Mutex<Option<MenuItem<tauri::Wry>>>,
-    autostart_item: Mutex<Option<MenuItem<tauri::Wry>>>,
+    config:Mutex<CompanionConfig>, config_path:PathBuf, bindings:Mutex<HashMap<u32,Binding>>,
+    conflicts:Mutex<Vec<String>>, registered_count:Mutex<usize>, paused:AtomicBool,
+    syncing:AtomicBool, synced:AtomicBool, client:Client,
+    status_item:Mutex<Option<MenuItem<tauri::Wry>>>, project_item:Mutex<Option<MenuItem<tauri::Wry>>>,
+    pause_item:Mutex<Option<MenuItem<tauri::Wry>>>, autostart_item:Mutex<Option<MenuItem<tauri::Wry>>>,
 }
+impl AppState { fn config(&self)->CompanionConfig { self.config.lock().expect("config lock").clone() } }
 
-impl AppState {
-    fn config(&self) -> CompanionConfig {
-        self.config.lock().expect("config lock poisoned").clone()
-    }
+#[tauri::command]
+fn get_companion_status(app:AppHandle,state:State<'_,Arc<AppState>>)->CompanionStatus {
+    let c=state.config(); CompanionStatus { paired:!c.pair_token.is_empty(), connected:state.synced.load(Ordering::Acquire),
+        paused:state.paused.load(Ordering::Acquire), registered_count:*state.registered_count.lock().expect("count lock"),
+        conflicts:state.conflicts.lock().expect("conflicts lock").clone(), gateway_url:c.gateway_url,
+        autostart:app.autolaunch().is_enabled().unwrap_or(c.start_with_os), close_to_tray:c.close_to_tray,
+        version:VERSION, active_project_id:c.active_project_id, active_project_name:c.active_project_name }
 }
 
 #[tauri::command]
-fn get_pairing_config(state: State<'_, Arc<AppState>>) -> PairingConfigView {
-    let config = state.config();
-    PairingConfigView {
-        pair_token: config.pair_token,
-        gateway_url: config.gateway_url,
-    }
+async fn activate_project_pairing(app:AppHandle,state:State<'_,Arc<AppState>>,pair_token:String,gateway_url:Option<String>,project_id:String,project_name:String)->Result<PairResult,String>{
+    if pair_token.trim().is_empty()||project_id.trim().is_empty(){return Err("The backend did not return a valid project pairing.".into())}
+    let url=gateway_url.unwrap_or_else(default_gateway).trim().trim_end_matches('/').to_owned();
+    reqwest::Url::parse(&url).map_err(|_|"Invalid gateway URL".to_string())?;
+    fetch_sync(&state.client,&url,pair_token.trim()).await?;
+    {let mut c=state.config.lock().map_err(|_|"Config unavailable")?; c.pair_token=pair_token.trim().into(); c.gateway_url=url; c.active_project_id=project_id; c.active_project_name=project_name; save_config(&state.config_path,&c)?;}
+    update_project(&state); sync_and_register(&app,state.inner().clone()).await
 }
-
 #[tauri::command]
-async fn pair_companion(
-    app: AppHandle,
-    state: State<'_, Arc<AppState>>,
-    pair_token: String,
-    gateway_url: String,
-) -> Result<PairResult, String> {
-    if pair_token.trim().is_empty() {
-        return Err("Enter a pairing token.".into());
-    }
-    let gateway_url = gateway_url.trim().trim_end_matches('/').to_owned();
-    reqwest::Url::parse(&gateway_url).map_err(|_| "Enter a valid Gateway URL.".to_string())?;
-
-    // Validate before replacing a known-good saved pairing.
-    fetch_sync(&state.client, &gateway_url, pair_token.trim()).await?;
-    {
-        let mut config = state.config.lock().map_err(|_| "Config is unavailable")?;
-        config.pair_token = pair_token.trim().to_owned();
-        config.gateway_url = gateway_url;
-        save_config(&state.config_path, &config)?;
-    }
-    sync_and_register(&app, state.inner().clone()).await
-}
-
+async fn resync_hotkeys(app:AppHandle,state:State<'_,Arc<AppState>>)->Result<PairResult,String>{sync_and_register(&app,state.inner().clone()).await}
 #[tauri::command]
-fn hide_pairing_window(window: WebviewWindow) -> Result<(), String> {
-    window.hide().map_err(|error| error.to_string())
+async fn set_hotkeys_paused(state:State<'_,Arc<AppState>>,paused:bool)->Result<(),String>{set_paused(state.inner(),paused).await}
+#[tauri::command]
+fn set_autostart(app:AppHandle,state:State<'_,Arc<AppState>>,enabled:bool)->Result<(),String>{
+    if enabled{app.autolaunch().enable()}else{app.autolaunch().disable()}.map_err(|e|e.to_string())?;
+    let mut c=state.config.lock().map_err(|_|"Config unavailable")?; c.start_with_os=enabled; save_config(&state.config_path,&c)?; update_autostart(&state,enabled); Ok(())
+}
+#[tauri::command]
+fn disconnect_companion(app:AppHandle,state:State<'_,Arc<AppState>>)->Result<(),String>{
+    app.global_shortcut().unregister_all().map_err(|e|e.to_string())?;
+    {let mut c=state.config.lock().map_err(|_|"Config unavailable")?; c.pair_token.clear();c.active_project_id.clear();c.active_project_name.clear();save_config(&state.config_path,&c)?;}
+    state.bindings.lock().expect("bindings lock").clear();state.conflicts.lock().expect("conflicts lock").clear();*state.registered_count.lock().expect("count lock")=0;
+    state.synced.store(false,Ordering::Release);state.paused.store(false,Ordering::Release);update_status(&state,"Status: Not paired");update_project(&state);Ok(())
+}
+#[tauri::command] fn show_main_window(app:AppHandle)->Result<(),String>{show_main(&app)}
+#[tauri::command] fn exit_application(app:AppHandle){app.exit(0)}
+
+fn load_config(path:&PathBuf)->CompanionConfig{fs::read_to_string(path).ok().and_then(|v|serde_json::from_str(&v).ok()).unwrap_or_default()}
+fn save_config(path:&PathBuf,c:&CompanionConfig)->Result<(),String>{if let Some(p)=path.parent(){fs::create_dir_all(p).map_err(|e|e.to_string())?}fs::write(path,serde_json::to_string_pretty(c).map_err(|e|e.to_string())?).map_err(|e|e.to_string())}
+async fn post<T:for<'a>Deserialize<'a>>(client:&Client,url:&str,body:serde_json::Value)->Result<T,String>{
+    let response=client.post(url).json(&body).send().await.map_err(|e|format!("Cannot reach LiveSprite: {e}"))?;let status=response.status();
+    if !status.is_success(){let message=response.text().await.unwrap_or_default();return Err(if [401,403].contains(&status.as_u16()){"The project pairing is invalid or expired.".into()}else{format!("Gateway returned {status}: {message}")})}
+    response.json().await.map_err(|e|format!("Invalid gateway response: {e}"))
+}
+async fn fetch_sync(client:&Client,url:&str,token:&str)->Result<SyncResponse,String>{post(client,url,serde_json::json!({"action":"sync","pairToken":token})).await}
+
+struct SyncGuard(Arc<AppState>);impl Drop for SyncGuard{fn drop(&mut self){self.0.syncing.store(false,Ordering::Release)}}
+async fn sync_and_register(app:&AppHandle,state:Arc<AppState>)->Result<PairResult,String>{
+    if state.syncing.swap(true,Ordering::AcqRel){return Err("A hotkey sync is already in progress.".into())}let _guard=SyncGuard(state.clone());let c=state.config();
+    if c.pair_token.is_empty(){update_status(&state,"Status: Not paired");return Err("No native project is active.".into())}state.synced.store(false,Ordering::Release);
+    let response=fetch_sync(&state.client,&c.gateway_url,&c.pair_token).await?;app.global_shortcut().unregister_all().map_err(|e|e.to_string())?;
+    let mut registered=HashMap::new();let mut conflicts=Vec::new();
+    for binding in response.bindings.into_iter().filter(|b|b.enabled){let accel=match to_accelerator(&binding){Ok(v)=>v,Err(e)=>{conflicts.push(e);continue}};
+        let shortcut:Shortcut=match accel.parse(){Ok(v)=>v,Err(e)=>{conflicts.push(format!("{accel}: {e}"));continue}};
+        match app.global_shortcut().register(shortcut){Ok(())=>{registered.insert(shortcut.id(),binding);},Err(e)=>conflicts.push(format!("{accel}: {e}"))}}
+    let count=registered.len();*state.bindings.lock().expect("bindings lock")=registered;*state.conflicts.lock().expect("conflicts lock")=conflicts.clone();*state.registered_count.lock().expect("count lock")=count;
+    state.paused.store(response.hotkeys_paused,Ordering::Release);state.synced.store(true,Ordering::Release);update_connected(&state);Ok(PairResult{registered_count:count,conflicts})
 }
 
-fn load_config(path: &PathBuf) -> CompanionConfig {
-    fs::read_to_string(path)
-        .ok()
-        .and_then(|raw| serde_json::from_str(&raw).ok())
-        .unwrap_or_default()
+fn to_accelerator(binding:&Binding)->Result<String,String>{
+    let mut p=Vec::new();for m in ["ctrl","shift","alt"]{if binding.modifiers.iter().any(|v|v.eq_ignore_ascii_case(m)){p.push(match m{"ctrl"=>"Control","shift"=>"Shift",_=>"Alt"}.to_owned())}}
+    let raw=binding.key.trim();let upper=raw.to_ascii_uppercase();let key=if upper.len()==1&&upper.as_bytes()[0].is_ascii_alphabetic(){format!("Key{upper}")}
+    else if upper.len()==1&&upper.as_bytes()[0].is_ascii_digit(){format!("Digit{upper}")}
+    else if upper.starts_with('F')&&upper[1..].parse::<u8>().is_ok_and(|n|(1..=12).contains(&n)){upper}
+    else{match upper.as_str(){"SPACE"=>"Space","ENTER"|"RETURN"=>"Enter","ESC"|"ESCAPE"=>"Escape","TAB"=>"Tab","BACKSPACE"=>"Backspace","DELETE"=>"Delete","INSERT"=>"Insert","HOME"=>"Home","END"=>"End","PAGEUP"=>"PageUp","PAGEDOWN"=>"PageDown","UP"|"ARROWUP"=>"ArrowUp","DOWN"|"ARROWDOWN"=>"ArrowDown","LEFT"|"ARROWLEFT"=>"ArrowLeft","RIGHT"|"ARROWRIGHT"=>"ArrowRight",_=>return Err(format!("Unsupported key: {raw}"))}.to_owned()};p.push(key);Ok(p.join("+"))
 }
+fn dispatch(app:&AppHandle,shortcut:&Shortcut,event:ShortcutState){let state=app.state::<Arc<AppState>>().inner().clone();if state.paused.load(Ordering::Acquire)||!state.synced.load(Ordering::Acquire){return}
+    let binding=state.bindings.lock().ok().and_then(|v|v.get(&shortcut.id()).cloned());let Some(binding)=binding else{return};let release=matches!(event,ShortcutState::Released);if release&&binding.mode!="hold"{return}let c=state.config();
+    tauri::async_runtime::spawn(async move{let _:Result<serde_json::Value,String>=post(&state.client,&c.gateway_url,serde_json::json!({"action":"event","pairToken":c.pair_token,"bindingId":binding.id,"release":release})).await;});}
 
-fn save_config(path: &PathBuf, config: &CompanionConfig) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    let json = serde_json::to_string_pretty(config).map_err(|error| error.to_string())?;
-    fs::write(path, json).map_err(|error| error.to_string())
-}
+fn update_status(s:&AppState,text:&str){if let Ok(i)=s.status_item.lock(){if let Some(i)=i.as_ref(){let _=i.set_text(text)}}}
+fn update_project(s:&AppState){let n=s.config().active_project_name;let text=if n.is_empty(){"Active Project: None".into()}else{format!("Active Project: {n}")};if let Ok(i)=s.project_item.lock(){if let Some(i)=i.as_ref(){let _=i.set_text(text)}}}
+fn update_pause(s:&AppState){let text=if s.paused.load(Ordering::Acquire){"Resume Hotkeys"}else{"Pause Hotkeys"};if let Ok(i)=s.pause_item.lock(){if let Some(i)=i.as_ref(){let _=i.set_text(text)}}}
+fn update_autostart(s:&AppState,on:bool){if let Ok(i)=s.autostart_item.lock(){if let Some(i)=i.as_ref(){let _=i.set_text(if on{"Disable autostart"}else{"Start with OS"})}}}
+fn update_connected(s:&AppState){if s.paused.load(Ordering::Acquire){update_status(s,"Status: Connected · Paused")}else{let n=*s.registered_count.lock().expect("count lock");update_status(s,&format!("Status: Connected · {n} hotkeys"))}update_pause(s)}
+async fn set_paused(s:&Arc<AppState>,paused:bool)->Result<(),String>{let c=s.config();if c.pair_token.is_empty(){return Err("No native project is active.".into())}let _:serde_json::Value=post(&s.client,&c.gateway_url,serde_json::json!({"action":"pause","pairToken":c.pair_token,"paused":paused})).await?;s.paused.store(paused,Ordering::Release);update_connected(s);Ok(())}
+async fn heartbeat(s:Arc<AppState>)->Result<(),String>{let c=s.config();if c.pair_token.is_empty(){update_status(&s,"Status: Not paired");return Ok(())}let count=*s.registered_count.lock().map_err(|_|"count unavailable")?;let conflicts=s.conflicts.lock().map_err(|_|"conflicts unavailable")?.clone();
+    let r:HeartbeatResponse=post(&s.client,&c.gateway_url,serde_json::json!({"action":"heartbeat","pairToken":c.pair_token,"registeredCount":count,"conflicts":conflicts,"version":VERSION})).await?;s.paused.store(r.hotkeys_paused,Ordering::Release);update_connected(&s);Ok(())}
+fn start_heartbeat(app:AppHandle,s:Arc<AppState>){tauri::async_runtime::spawn(async move{let mut failures=0u8;let mut interval=tokio::time::interval(Duration::from_secs(10));interval.tick().await;loop{interval.tick().await;match heartbeat(s.clone()).await{Ok(())=>{failures=0;if !s.synced.load(Ordering::Acquire)&&!s.config().pair_token.is_empty(){let _=sync_and_register(&app,s.clone()).await}},Err(_)=>{failures=failures.saturating_add(1);if failures>=3{s.synced.store(false,Ordering::Release);update_status(&s,"Status: Disconnected");if sync_and_register(&app,s.clone()).await.is_ok(){failures=0}}}}}})}
+fn show_main(app:&AppHandle)->Result<(),String>{let w=app.get_webview_window("main").ok_or("LiveSprite window unavailable")?;w.show().map_err(|e|e.to_string())?;let _=w.unminimize();w.set_focus().map_err(|e|e.to_string())}
+fn spawn_sync(app:AppHandle){let s=app.state::<Arc<AppState>>().inner().clone();tauri::async_runtime::spawn(async move{if sync_and_register(&app,s.clone()).await.is_err(){s.synced.store(false,Ordering::Release);update_status(&s,"Status: Disconnected")}});}
 
-async fn gateway_post<T: for<'de> Deserialize<'de>>(
-    client: &Client,
-    url: &str,
-    body: serde_json::Value,
-) -> Result<T, String> {
-    let response = client
-        .post(url)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|error| format!("Cannot reach the LiveSprite gateway: {error}"))?;
-    let status = response.status();
-    if !status.is_success() {
-        let message = response.text().await.unwrap_or_default();
-        return Err(if status.as_u16() == 401 || status.as_u16() == 403 {
-            "The pairing token is invalid or expired.".into()
-        } else {
-            format!("Gateway returned {status}: {message}")
-        });
-    }
-    response
-        .json::<T>()
-        .await
-        .map_err(|error| format!("Invalid gateway response: {error}"))
-}
+fn main(){tauri::Builder::default()
+    .plugin(tauri_plugin_single_instance::init(|app,_args,_cwd|{let _=show_main(app);}))
+    .plugin(tauri_plugin_opener::init()).plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent,None))
+    .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app,shortcut,event|dispatch(app,shortcut,event.state())).build())
+    .invoke_handler(tauri::generate_handler![get_companion_status,activate_project_pairing,resync_hotkeys,set_hotkeys_paused,set_autostart,disconnect_companion,show_main_window,exit_application])
+    .on_window_event(|window,event|{if window.label()=="main"{if let WindowEvent::CloseRequested{api,..}=event{if window.state::<Arc<AppState>>().config().close_to_tray{api.prevent_close();let _=window.hide()}}}})
+    .setup(|app|{let path=app.path().app_config_dir()?.join("companion.json");let mut c=load_config(&path);let auto=app.autolaunch().is_enabled().unwrap_or(c.start_with_os);c.start_with_os=auto;let _=save_config(&path,&c);
+        let s=Arc::new(AppState{config:Mutex::new(c.clone()),config_path:path,bindings:Mutex::new(HashMap::new()),conflicts:Mutex::new(Vec::new()),registered_count:Mutex::new(0),paused:AtomicBool::new(false),syncing:AtomicBool::new(false),synced:AtomicBool::new(false),client:Client::builder().timeout(Duration::from_secs(8)).build()?,status_item:Mutex::new(None),project_item:Mutex::new(None),pause_item:Mutex::new(None),autostart_item:Mutex::new(None)});app.manage(s.clone());
+        let status=MenuItem::with_id(app,"status",if c.pair_token.is_empty(){"Status: Not paired"}else{"Status: Disconnected"},false,None::<&str>)?;let project=MenuItem::with_id(app,"project",if c.active_project_name.is_empty(){"Active Project: None".into()}else{format!("Active Project: {}",c.active_project_name)},false,None::<&str>)?;
+        let open=MenuItem::with_id(app,"open","Open LiveSprite",true,None::<&str>)?;let pause=MenuItem::with_id(app,"pause","Pause Hotkeys",true,None::<&str>)?;let resync=MenuItem::with_id(app,"resync","Re-sync Hotkeys",true,None::<&str>)?;let autostart=MenuItem::with_id(app,"autostart",if auto{"Disable autostart"}else{"Start with OS"},true,None::<&str>)?;let exit=MenuItem::with_id(app,"exit","Exit LiveSprite",true,None::<&str>)?;
+        let menu=Menu::with_items(app,&[&status,&project,&open,&pause,&resync,&autostart,&exit])?;*s.status_item.lock().expect("status lock")=Some(status);*s.project_item.lock().expect("project lock")=Some(project);*s.pause_item.lock().expect("pause lock")=Some(pause);*s.autostart_item.lock().expect("autostart lock")=Some(autostart);
+        TrayIconBuilder::with_id("main-tray").icon(app.default_window_icon().cloned().expect("icon missing")).tooltip("LiveSprite").menu(&menu).show_menu_on_left_click(false)
+            .on_tray_icon_event(|tray,event|{if matches!(event,TrayIconEvent::DoubleClick{..}){let _=show_main(tray.app_handle())}})
+            .on_menu_event(|app,event|match event.id().as_ref(){"open"=>{let _=show_main(app);},"resync"=>spawn_sync(app.clone()),"pause"=>{let s=app.state::<Arc<AppState>>().inner().clone();tauri::async_runtime::spawn(async move{let p=!s.paused.load(Ordering::Acquire);if set_paused(&s,p).await.is_err(){update_status(&s,"Status: Disconnected")}});},"autostart"=>{let s=app.state::<Arc<AppState>>().inner().clone();let on=!app.autolaunch().is_enabled().unwrap_or(false);if(if on{app.autolaunch().enable()}else{app.autolaunch().disable()}).is_ok(){if let Ok(mut c)=s.config.lock(){c.start_with_os=on;let _=save_config(&s.config_path,&c)}update_autostart(&s,on)}},"exit"=>app.exit(0),_=>{}}).build(app)?;
+        start_heartbeat(app.handle().clone(),s);if !c.pair_token.is_empty(){spawn_sync(app.handle().clone())}let _=show_main(app.handle());Ok(())})
+    .run(tauri::generate_context!()).expect("error while running LiveSprite")}
 
-async fn fetch_sync(client: &Client, url: &str, token: &str) -> Result<SyncResponse, String> {
-    gateway_post(
-        client,
-        url,
-        serde_json::json!({ "action": "sync", "pairToken": token }),
-    )
-    .await
-}
-
-struct SyncGuard(Arc<AppState>);
-impl Drop for SyncGuard {
-    fn drop(&mut self) {
-        self.0.syncing.store(false, Ordering::Release);
-    }
-}
-
-async fn sync_and_register(app: &AppHandle, state: Arc<AppState>) -> Result<PairResult, String> {
-    if state.syncing.swap(true, Ordering::AcqRel) {
-        return Err("A hotkey sync is already in progress.".into());
-    }
-    let _guard = SyncGuard(state.clone());
-    let config = state.config();
-    if config.pair_token.is_empty() {
-        update_status(&state, "Status: Not paired");
-        return Err("Pair the companion first.".into());
-    }
-    state.synced.store(false, Ordering::Release);
-
-    let response = fetch_sync(&state.client, &config.gateway_url, &config.pair_token).await?;
-    app.global_shortcut()
-        .unregister_all()
-        .map_err(|error| error.to_string())?;
-
-    let mut registered = HashMap::new();
-    let mut conflicts = Vec::new();
-    for binding in response.bindings.into_iter().filter(|binding| binding.enabled) {
-        let accelerator = match to_accelerator(&binding) {
-            Ok(value) => value,
-            Err(error) => {
-                conflicts.push(error);
-                continue;
-            }
-        };
-        let shortcut: Shortcut = match accelerator.parse() {
-            Ok(value) => value,
-            Err(error) => {
-                conflicts.push(format!("{accelerator}: {error}"));
-                continue;
-            }
-        };
-        match app.global_shortcut().register(shortcut) {
-            Ok(()) => {
-                registered.insert(shortcut.id(), binding);
-            }
-            Err(error) => conflicts.push(format!("{accelerator}: {error}")),
-        }
-    }
-
-    let count = registered.len();
-    *state.bindings.lock().expect("bindings lock poisoned") = registered;
-    *state.conflicts.lock().expect("conflicts lock poisoned") = conflicts.clone();
-    *state.registered_count.lock().expect("count lock poisoned") = count;
-    state.paused.store(response.hotkeys_paused, Ordering::Release);
-    state.synced.store(true, Ordering::Release);
-    update_connected_status(&state);
-    Ok(PairResult {
-        registered_count: count,
-        conflicts,
-    })
-}
-
-fn to_accelerator(binding: &Binding) -> Result<String, String> {
-    let mut parts = Vec::new();
-    for modifier in ["ctrl", "shift", "alt"] {
-        if binding
-            .modifiers
-            .iter()
-            .any(|value| value.eq_ignore_ascii_case(modifier))
-        {
-            parts.push(match modifier {
-                "ctrl" => "Control".to_owned(),
-                "shift" => "Shift".to_owned(),
-                _ => "Alt".to_owned(),
-            });
-        }
-    }
-    let raw = binding.key.trim();
-    let upper = raw.to_ascii_uppercase();
-    let key = if upper.len() == 1 && upper.as_bytes()[0].is_ascii_alphabetic() {
-        format!("Key{upper}")
-    } else if upper.len() == 1 && upper.as_bytes()[0].is_ascii_digit() {
-        format!("Digit{upper}")
-    } else if upper.starts_with('F')
-        && upper[1..].parse::<u8>().is_ok_and(|number| (1..=12).contains(&number))
-    {
-        upper
-    } else {
-        match upper.as_str() {
-            "SPACE" => "Space",
-            "ENTER" | "RETURN" => "Enter",
-            "ESC" | "ESCAPE" => "Escape",
-            "TAB" => "Tab",
-            "BACKSPACE" => "Backspace",
-            "DELETE" => "Delete",
-            "INSERT" => "Insert",
-            "HOME" => "Home",
-            "END" => "End",
-            "PAGEUP" => "PageUp",
-            "PAGEDOWN" => "PageDown",
-            "UP" | "ARROWUP" => "ArrowUp",
-            "DOWN" | "ARROWDOWN" => "ArrowDown",
-            "LEFT" | "ARROWLEFT" => "ArrowLeft",
-            "RIGHT" | "ARROWRIGHT" => "ArrowRight",
-            _ => return Err(format!("Unsupported key: {raw}")),
-        }
-        .to_owned()
-    };
-    parts.push(key);
-    Ok(parts.join("+"))
-}
-
-fn dispatch_shortcut(app: &AppHandle, shortcut: &Shortcut, event_state: ShortcutState) {
-    let state = app.state::<Arc<AppState>>().inner().clone();
-    if state.paused.load(Ordering::Acquire) {
-        return;
-    }
-    let binding = state
-        .bindings
-        .lock()
-        .ok()
-        .and_then(|bindings| bindings.get(&shortcut.id()).cloned());
-    let Some(binding) = binding else { return };
-    let release = matches!(event_state, ShortcutState::Released);
-    if release && binding.mode != "hold" {
-        return;
-    }
-    let config = state.config();
-    if config.pair_token.is_empty() {
-        return;
-    }
-    tauri::async_runtime::spawn(async move {
-        let _: Result<serde_json::Value, String> = gateway_post(
-            &state.client,
-            &config.gateway_url,
-            serde_json::json!({
-                "action": "event",
-                "pairToken": config.pair_token,
-                "bindingId": binding.id,
-                "release": release
-            }),
-        )
-        .await;
-    });
-}
-
-fn update_status(state: &AppState, text: &str) {
-    if let Ok(item) = state.status_item.lock() {
-        if let Some(item) = item.as_ref() {
-            let _ = item.set_text(text);
-        }
-    }
-}
-
-fn update_connected_status(state: &AppState) {
-    if state.paused.load(Ordering::Acquire) {
-        update_status(state, "Status: Connected · Paused");
-    } else {
-        let count = *state.registered_count.lock().expect("count lock poisoned");
-        update_status(state, &format!("Status: Connected · {count} hotkeys"));
-    }
-}
-
-async fn heartbeat(app: &AppHandle, state: Arc<AppState>) -> Result<(), String> {
-    let config = state.config();
-    if config.pair_token.is_empty() {
-        update_status(&state, "Status: Not paired");
-        return Ok(());
-    }
-    let count = *state.registered_count.lock().map_err(|_| "count unavailable")?;
-    let conflicts = state
-        .conflicts
-        .lock()
-        .map_err(|_| "conflicts unavailable")?
-        .clone();
-    let response: HeartbeatResponse = gateway_post(
-        &state.client,
-        &config.gateway_url,
-        serde_json::json!({
-            "action": "heartbeat",
-            "pairToken": config.pair_token,
-            "registeredCount": count,
-            "conflicts": conflicts,
-            "version": VERSION
-        }),
-    )
-    .await?;
-    state.paused.store(response.hotkeys_paused, Ordering::Release);
-    update_connected_status(&state);
-    let _ = app; // retained for symmetry with reconnect calls
-    Ok(())
-}
-
-fn start_heartbeat_loop(app: AppHandle, state: Arc<AppState>) {
-    tauri::async_runtime::spawn(async move {
-        let mut failures = 0u8;
-        let mut interval = tokio::time::interval(Duration::from_secs(10));
-        interval.tick().await;
-        loop {
-            interval.tick().await;
-            match heartbeat(&app, state.clone()).await {
-                Ok(()) => {
-                    failures = 0;
-                    if !state.synced.load(Ordering::Acquire) {
-                        let _ = sync_and_register(&app, state.clone()).await;
-                    }
-                }
-                Err(_) => {
-                    failures = failures.saturating_add(1);
-                    if failures >= 3 {
-                        state.synced.store(false, Ordering::Release);
-                        update_status(&state, "Status: Disconnected");
-                        if sync_and_register(&app, state.clone()).await.is_ok() {
-                            failures = 0;
-                        }
-                    }
-                }
-            }
-        }
-    });
-}
-
-fn show_pairing(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("pairing") {
-        let _ = window.show();
-        let _ = window.set_focus();
-    }
-}
-
-fn spawn_sync(app: AppHandle) {
-    let state = app.state::<Arc<AppState>>().inner().clone();
-    tauri::async_runtime::spawn(async move {
-        if sync_and_register(&app, state.clone()).await.is_err() {
-            update_status(&state, "Status: Disconnected");
-        }
-    });
-}
-
-fn main() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_autostart::init(
-            MacosLauncher::LaunchAgent,
-            None,
-        ))
-        .plugin(
-            tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|app, shortcut, event| {
-                    dispatch_shortcut(app, shortcut, event.state());
-                })
-                .build(),
-        )
-        .invoke_handler(tauri::generate_handler![
-            get_pairing_config,
-            pair_companion,
-            hide_pairing_window
-        ])
-        .setup(|app| {
-            let config_path = app
-                .path()
-                .app_config_dir()?
-                .join("companion.json");
-            let mut config = load_config(&config_path);
-            let actual_autostart = app.autolaunch().is_enabled().unwrap_or(config.start_with_os);
-            config.start_with_os = actual_autostart;
-            let _ = save_config(&config_path, &config);
-
-            let state = Arc::new(AppState {
-                config: Mutex::new(config.clone()),
-                config_path,
-                bindings: Mutex::new(HashMap::new()),
-                conflicts: Mutex::new(Vec::new()),
-                registered_count: Mutex::new(0),
-                paused: AtomicBool::new(false),
-                syncing: AtomicBool::new(false),
-                synced: AtomicBool::new(false),
-                client: Client::builder().timeout(Duration::from_secs(8)).build()?,
-                status_item: Mutex::new(None),
-                autostart_item: Mutex::new(None),
-            });
-            app.manage(state.clone());
-
-            let status_text = if config.pair_token.is_empty() {
-                "Status: Not paired"
-            } else {
-                "Status: Disconnected"
-            };
-            let status = MenuItem::with_id(app, "status", status_text, false, None::<&str>)?;
-            let pair = MenuItem::with_id(app, "pair", "Pair…", true, None::<&str>)?;
-            let resync = MenuItem::with_id(app, "resync", "Re-sync Hotkeys", true, None::<&str>)?;
-            let pause = MenuItem::with_id(app, "pause", "Pause Hotkeys", true, None::<&str>)?;
-            let autostart_label = if actual_autostart { "Disable autostart" } else { "Start with OS" };
-            let autostart = MenuItem::with_id(app, "autostart", autostart_label, true, None::<&str>)?;
-            let open = MenuItem::with_id(app, "open", "Open LiveSprite", true, None::<&str>)?;
-            let exit = MenuItem::with_id(app, "exit", "Exit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&status, &pair, &resync, &pause, &autostart, &open, &exit])?;
-            *state.status_item.lock().expect("status lock poisoned") = Some(status);
-            *state.autostart_item.lock().expect("autostart lock poisoned") = Some(autostart);
-
-            TrayIconBuilder::with_id(TRAY_ID)
-                .icon(app.default_window_icon().cloned().expect("application icon missing"))
-                .tooltip("LiveSprite Companion")
-                .menu(&menu)
-                .show_menu_on_left_click(true)
-                .on_menu_event(|app, event| match event.id().as_ref() {
-                    "pair" => show_pairing(app),
-                    "resync" => spawn_sync(app.clone()),
-                    "pause" => {
-                        let state = app.state::<Arc<AppState>>().inner().clone();
-                        let app = app.clone();
-                        tauri::async_runtime::spawn(async move {
-                            let paused = !state.paused.load(Ordering::Acquire);
-                            let config = state.config();
-                            let result: Result<serde_json::Value, String> = gateway_post(
-                                &state.client,
-                                &config.gateway_url,
-                                serde_json::json!({ "action": "pause", "pairToken": config.pair_token, "paused": paused }),
-                            ).await;
-                            if result.is_ok() {
-                                state.paused.store(paused, Ordering::Release);
-                                update_connected_status(&state);
-                            } else {
-                                update_status(&state, "Status: Disconnected");
-                            }
-                            let _ = app;
-                        });
-                    }
-                    "autostart" => {
-                        let state = app.state::<Arc<AppState>>().inner().clone();
-                        let currently_enabled = app.autolaunch().is_enabled().unwrap_or(false);
-                        let result = if currently_enabled { app.autolaunch().disable() } else { app.autolaunch().enable() };
-                        if result.is_ok() {
-                            let enabled = !currently_enabled;
-                            if let Ok(mut config) = state.config.lock() {
-                                config.start_with_os = enabled;
-                                let _ = save_config(&state.config_path, &config);
-                            }
-                            if let Ok(item) = state.autostart_item.lock() {
-                                if let Some(item) = item.as_ref() {
-                                    let _ = item.set_text(if enabled { "Disable autostart" } else { "Start with OS" });
-                                }
-                            }
-                        }
-                    }
-                    "open" => { let _ = app.opener().open_url(LIVE_SPRITE_URL, None::<&str>); }
-                    "exit" => app.exit(0),
-                    _ => {}
-                })
-                .build(app)?;
-
-            start_heartbeat_loop(app.handle().clone(), state);
-            if !config.pair_token.is_empty() {
-                spawn_sync(app.handle().clone());
-            }
-            Ok(())
-        })
-        .run(tauri::generate_context!())
-        .expect("error while running LiveSprite Companion");
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn binding(key: &str, modifiers: &[&str]) -> Binding {
-        Binding {
-            id: "id".into(), action_type: "expression".into(), action: "x".into(),
-            target_id: "target".into(), target_name: "Target".into(), key: key.into(),
-            modifiers: modifiers.iter().map(|value| value.to_string()).collect(),
-            mode: "press".into(), enabled: true,
-        }
-    }
-
-    #[test]
-    fn accelerator_mapping_is_canonical() {
-        assert_eq!(to_accelerator(&binding("B", &["alt", "ctrl", "shift"])).unwrap(), "Control+Shift+Alt+KeyB");
-        assert_eq!(to_accelerator(&binding("1", &[])).unwrap(), "Digit1");
-        assert_eq!(to_accelerator(&binding("F12", &[])).unwrap(), "F12");
-        assert_eq!(to_accelerator(&binding("Space", &[])).unwrap(), "Space");
-    }
-}
+#[cfg(test)]mod tests{use super::*;fn b(key:&str,m:&[&str])->Binding{Binding{id:"id".into(),action_type:"expression".into(),action:"x".into(),target_id:"t".into(),target_name:"T".into(),key:key.into(),modifiers:m.iter().map(|v|v.to_string()).collect(),mode:"press".into(),enabled:true}}
+#[test]fn accelerators(){assert_eq!(to_accelerator(&b("B",&["alt","ctrl","shift"])).unwrap(),"Control+Shift+Alt+KeyB");assert_eq!(to_accelerator(&b("1",&[])).unwrap(),"Digit1");assert_eq!(to_accelerator(&b("F12",&[])).unwrap(),"F12")}}

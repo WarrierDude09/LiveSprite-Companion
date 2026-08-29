@@ -1,34 +1,39 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "LiveSprite Companion",
-  "version": "1.0.0",
+  "productName": "LiveSprite",
+  "version": "1.1.0",
   "identifier": "app.livesprite.companion",
   "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:1420",
     "frontendDist": "../dist"
   },
   "app": {
-    "withGlobalTauri": true,
+    "withGlobalTauri": false,
     "windows": [
       {
-        "label": "pairing",
-        "title": "Pair LiveSprite Companion",
+        "label": "main",
+        "title": "LiveSprite",
         "url": "index.html",
-        "width": 440,
-        "height": 430,
-        "resizable": false,
+        "width": 1200,
+        "height": 780,
+        "minWidth": 900,
+        "minHeight": 600,
+        "resizable": true,
         "center": true,
-        "visible": false
+        "visible": true
       }
     ],
     "security": {
-      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'"
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost https://base44.app https://*.base44.app wss://*.base44.app; img-src 'self' asset: https://asset.localhost https://media.base44.com https://*.base44.app data: blob:; font-src 'self' data:; media-src 'self' https://media.base44.com https://*.base44.app blob:"
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icon.icns", "icon.ico"],
-    "shortDescription": "Global hotkeys for LiveSprite",
-    "longDescription": "Registers project hotkeys and forwards them to an active LiveSprite session."
+    "shortDescription": "The native LiveSprite desktop application",
+    "longDescription": "Use your LiveSprite account and projects with native global hotkeys, background operation, tray controls, and autostart."
   }
 }
