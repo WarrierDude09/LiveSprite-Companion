@@ -15,4 +15,8 @@ export const NativeCompanion = {
   disconnect: () => invoke("disconnect_companion"),
   showMainWindow: () => invoke("show_main_window"),
   exit: () => invoke("exit_application"),
+  listMicrophones: () => invoke("list_microphones"),
+  startVoiceEngine: (config) => invoke("start_voice_engine", { config }),
+  stopVoiceEngine: () => invoke("stop_voice_engine"),
+  getAudioStatus: () => invoke("get_audio_status"),
 };
