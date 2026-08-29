@@ -1,7 +1,7 @@
 {
   "name": "livesprite-companion",
   "private": true,
-  "version": "1.1.0",
+  "version": "1.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -15,6 +15,7 @@
   "dependencies": {
     "@base44/sdk": "^0.8.44",
     "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-deep-link": "^2.4.3",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   }

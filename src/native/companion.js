@@ -15,4 +15,5 @@ export const NativeCompanion = {
   disconnect: () => invoke("disconnect_companion"),
   showMainWindow: () => invoke("show_main_window"),
   exit: () => invoke("exit_application"),
+  beginGoogleOAuth: () => invoke("begin_google_oauth"),
 };

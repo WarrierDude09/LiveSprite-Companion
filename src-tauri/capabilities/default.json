@@ -3,5 +3,5 @@
   "identifier": "main-capability",
   "description": "Scoped LiveSprite desktop IPC access",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "deep-link:default"]
 }

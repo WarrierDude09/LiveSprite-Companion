@@ -7,7 +7,7 @@ This inventory was derived from the production LiveSprite bundle and its real Ba
 | Email/password login and session restore | Base44 Auth | Implemented |
 | Registration and email OTP verification | Base44 Auth | Implemented |
 | Password reset request | Base44 Auth | Implemented |
-| Google login | Base44 Auth provider | Deferred until a secure desktop deep-link callback exists |
+| Google login | Base44 Auth provider | Implemented through the system browser and validated `livesprite://login-callback` |
 | Account/profile | `Accounts` | Read-only summary implemented |
 | Project list/create/edit | `PNGTuberProject` | Implemented with real records |
 | Studio assets | `PNGAsset` | Real inventory/count; full editor pending shared web source |

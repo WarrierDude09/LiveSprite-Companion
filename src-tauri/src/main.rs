@@ -6,6 +6,7 @@ use std::{collections::HashMap, fs, path::PathBuf, sync::{atomic::{AtomicBool, O
 use tauri::{menu::{Menu, MenuItem}, tray::{TrayIconBuilder, TrayIconEvent}, AppHandle, Manager, State, WindowEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as AutostartExt};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
+use tauri_plugin_opener::OpenerExt;
 
 const DEFAULT_GATEWAY: &str = "https://live-png-flow.base44.app/functions/CompanionGateway";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -89,6 +90,18 @@ fn disconnect_companion(app:AppHandle,state:State<'_,Arc<AppState>>)->Result<(),
 }
 #[tauri::command] fn show_main_window(app:AppHandle)->Result<(),String>{show_main(&app)}
 #[tauri::command] fn exit_application(app:AppHandle){app.exit(0)}
+
+#[tauri::command]
+fn begin_google_oauth(app: AppHandle) -> Result<(), String> {
+    let mut url = reqwest::Url::parse("https://live-png-flow.base44.app/api/apps/auth/login")
+        .map_err(|error| error.to_string())?;
+    url.query_pairs_mut()
+        .append_pair("app_id", "6a91eb974450aba1bcc39dcd")
+        .append_pair("from_url", "livesprite://login-callback");
+    app.opener()
+        .open_url(url.as_str(), None::<&str>)
+        .map_err(|error| error.to_string())
+}
 
 fn load_config(path:&PathBuf)->CompanionConfig{fs::read_to_string(path).ok().and_then(|v|serde_json::from_str(&v).ok()).unwrap_or_default()}
 fn save_config(path:&PathBuf,c:&CompanionConfig)->Result<(),String>{if let Some(p)=path.parent(){fs::create_dir_all(p).map_err(|e|e.to_string())?}fs::write(path,serde_json::to_string_pretty(c).map_err(|e|e.to_string())?).map_err(|e|e.to_string())}
@@ -185,9 +198,10 @@ fn spawn_sync(app:AppHandle){let s=app.state::<Arc<AppState>>().inner().clone();
 
 fn main(){tauri::Builder::default()
     .plugin(tauri_plugin_single_instance::init(|app,_args,_cwd|{let _=show_main(app);}))
+    .plugin(tauri_plugin_deep_link::init())
     .plugin(tauri_plugin_opener::init()).plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent,None))
     .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app,shortcut,event|dispatch(app,shortcut,event.state())).build())
-    .invoke_handler(tauri::generate_handler![get_companion_status,activate_project_pairing,resync_hotkeys,set_hotkeys_paused,set_autostart,disconnect_companion,show_main_window,exit_application])
+    .invoke_handler(tauri::generate_handler![get_companion_status,activate_project_pairing,resync_hotkeys,set_hotkeys_paused,set_autostart,disconnect_companion,show_main_window,exit_application,begin_google_oauth])
     .on_window_event(|window,event|{if window.label()=="main"{if let WindowEvent::CloseRequested{api,..}=event{if window.state::<Arc<AppState>>().config().close_to_tray{api.prevent_close();let _=window.hide();}}}})
     .setup(|app|{let path=app.path().app_config_dir()?.join("companion.json");let mut c=load_config(&path);let auto=app.autolaunch().is_enabled().unwrap_or(c.start_with_os);c.start_with_os=auto;let _=save_config(&path,&c);
         let s=Arc::new(AppState{config:Mutex::new(c.clone()),config_path:path,bindings:Mutex::new(HashMap::new()),conflicts:Mutex::new(Vec::new()),registered_count:Mutex::new(0),paused:AtomicBool::new(false),syncing:AtomicBool::new(false),synced:AtomicBool::new(false),client:Client::builder().timeout(Duration::from_secs(8)).build()?,status_item:Mutex::new(None),project_item:Mutex::new(None),pause_item:Mutex::new(None),autostart_item:Mutex::new(None)});app.manage(s.clone());

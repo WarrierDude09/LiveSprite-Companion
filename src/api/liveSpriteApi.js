@@ -33,6 +33,10 @@ export const LiveSpriteAPI = {
     verifyOtp: (email, otpCode) => base44.auth.verifyOtp({ email, otpCode }),
     resendOtp: (email) => base44.auth.resendOtp(email),
     requestPasswordReset: (email) => base44.auth.resetPasswordRequest(email),
+    acceptOAuthToken: async (token) => {
+      base44.auth.setToken(token, true);
+      return base44.auth.me();
+    },
   },
   account: {
     async current(userId) {
