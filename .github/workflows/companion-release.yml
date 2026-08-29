@@ -35,7 +35,12 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
       - run: npm install
-      - run: npm run tauri build
+      - name: Build application
+        id: app-build
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run tauri build 2>&1 | tee "build-${{ runner.os }}.log"
       - name: Stage Windows bundle
         if: matrix.platform == 'windows-latest'
         shell: pwsh
@@ -47,6 +52,13 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: cp "$(find src-tauri/target/release/bundle/appimage -name '*.AppImage' -print -quit)" "${{ matrix.artifact }}"
       - uses: softprops/action-gh-release@v2
+        if: success()
         with:
           name: ${{ github.ref_name }}
           files: ${{ matrix.artifact }}
+      - name: Publish failure diagnostics
+        if: failure() && steps.app-build.outcome == 'failure'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          files: build-${{ runner.os }}.log
