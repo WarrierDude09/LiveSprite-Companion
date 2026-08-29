@@ -1,11 +1,14 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod audio;
+
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs, path::PathBuf, sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex}, time::Duration};
 use tauri::{menu::{Menu, MenuItem}, tray::{TrayIconBuilder, TrayIconEvent}, AppHandle, Manager, State, WindowEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as AutostartExt};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
+use audio::{AudioEngine, AudioStatus, VoiceConfig};
 
 const DEFAULT_GATEWAY: &str = "https://live-png-flow.base44.app/functions/CompanionGateway";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -50,6 +53,7 @@ struct AppState {
     syncing:AtomicBool, synced:AtomicBool, client:Client,
     status_item:Mutex<Option<MenuItem<tauri::Wry>>>, project_item:Mutex<Option<MenuItem<tauri::Wry>>>,
     pause_item:Mutex<Option<MenuItem<tauri::Wry>>>, autostart_item:Mutex<Option<MenuItem<tauri::Wry>>>,
+    audio: AudioEngine,
 }
 impl AppState { fn config(&self)->CompanionConfig { self.config.lock().expect("config lock").clone() } }
 
@@ -89,6 +93,10 @@ fn disconnect_companion(app:AppHandle,state:State<'_,Arc<AppState>>)->Result<(),
 }
 #[tauri::command] fn show_main_window(app:AppHandle)->Result<(),String>{show_main(&app)}
 #[tauri::command] fn exit_application(app:AppHandle){app.exit(0)}
+#[tauri::command] fn list_microphones(state:State<'_,Arc<AppState>>)->Result<Vec<String>,String>{state.audio.devices()}
+#[tauri::command] fn start_voice_engine(app:AppHandle,state:State<'_,Arc<AppState>>,config:VoiceConfig)->Result<(),String>{state.audio.start(config,app)}
+#[tauri::command] fn stop_voice_engine(state:State<'_,Arc<AppState>>){state.audio.stop()}
+#[tauri::command] fn get_audio_status(state:State<'_,Arc<AppState>>)->AudioStatus{state.audio.status()}
 
 fn load_config(path:&PathBuf)->CompanionConfig{fs::read_to_string(path).ok().and_then(|v|serde_json::from_str(&v).ok()).unwrap_or_default()}
 fn save_config(path:&PathBuf,c:&CompanionConfig)->Result<(),String>{if let Some(p)=path.parent(){fs::create_dir_all(p).map_err(|e|e.to_string())?}fs::write(path,serde_json::to_string_pretty(c).map_err(|e|e.to_string())?).map_err(|e|e.to_string())}
@@ -187,10 +195,10 @@ fn main(){tauri::Builder::default()
     .plugin(tauri_plugin_single_instance::init(|app,_args,_cwd|{let _=show_main(app);}))
     .plugin(tauri_plugin_opener::init()).plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent,None))
     .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app,shortcut,event|dispatch(app,shortcut,event.state())).build())
-    .invoke_handler(tauri::generate_handler![get_companion_status,activate_project_pairing,resync_hotkeys,set_hotkeys_paused,set_autostart,disconnect_companion,show_main_window,exit_application])
+    .invoke_handler(tauri::generate_handler![get_companion_status,activate_project_pairing,resync_hotkeys,set_hotkeys_paused,set_autostart,disconnect_companion,show_main_window,exit_application,list_microphones,start_voice_engine,stop_voice_engine,get_audio_status])
     .on_window_event(|window,event|{if window.label()=="main"{if let WindowEvent::CloseRequested{api,..}=event{if window.state::<Arc<AppState>>().config().close_to_tray{api.prevent_close();let _=window.hide();}}}})
     .setup(|app|{let path=app.path().app_config_dir()?.join("companion.json");let mut c=load_config(&path);let auto=app.autolaunch().is_enabled().unwrap_or(c.start_with_os);c.start_with_os=auto;let _=save_config(&path,&c);
-        let s=Arc::new(AppState{config:Mutex::new(c.clone()),config_path:path,bindings:Mutex::new(HashMap::new()),conflicts:Mutex::new(Vec::new()),registered_count:Mutex::new(0),paused:AtomicBool::new(false),syncing:AtomicBool::new(false),synced:AtomicBool::new(false),client:Client::builder().timeout(Duration::from_secs(8)).build()?,status_item:Mutex::new(None),project_item:Mutex::new(None),pause_item:Mutex::new(None),autostart_item:Mutex::new(None)});app.manage(s.clone());
+        let s=Arc::new(AppState{config:Mutex::new(c.clone()),config_path:path,bindings:Mutex::new(HashMap::new()),conflicts:Mutex::new(Vec::new()),registered_count:Mutex::new(0),paused:AtomicBool::new(false),syncing:AtomicBool::new(false),synced:AtomicBool::new(false),client:Client::builder().timeout(Duration::from_secs(8)).build()?,status_item:Mutex::new(None),project_item:Mutex::new(None),pause_item:Mutex::new(None),autostart_item:Mutex::new(None),audio:AudioEngine::default()});app.manage(s.clone());
         let status=MenuItem::with_id(app,"status",if c.pair_token.is_empty(){"Status: Not paired"}else{"Status: Disconnected"},false,None::<&str>)?;let project=MenuItem::with_id(app,"project",if c.active_project_name.is_empty(){"Active Project: None".into()}else{format!("Active Project: {}",c.active_project_name)},false,None::<&str>)?;
         let open=MenuItem::with_id(app,"open","Open LiveSprite",true,None::<&str>)?;let pause=MenuItem::with_id(app,"pause","Pause Hotkeys",true,None::<&str>)?;let resync=MenuItem::with_id(app,"resync","Re-sync Hotkeys",true,None::<&str>)?;let autostart=MenuItem::with_id(app,"autostart",if auto{"Disable autostart"}else{"Start with OS"},true,None::<&str>)?;let exit=MenuItem::with_id(app,"exit","Exit LiveSprite",true,None::<&str>)?;
         let menu=Menu::with_items(app,&[&status,&project,&open,&pause,&resync,&autostart,&exit])?;*s.status_item.lock().expect("status lock")=Some(status);*s.project_item.lock().expect("project lock")=Some(project);*s.pause_item.lock().expect("pause lock")=Some(pause);*s.autostart_item.lock().expect("autostart lock")=Some(autostart);

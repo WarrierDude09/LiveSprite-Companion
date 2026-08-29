@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { LiveSpriteAPI } from "./api/liveSpriteApi";
 import { NativeCompanion } from "./native/companion";
+import Studio from "./pages/Studio";
+import LiveStudio from "./pages/LiveStudio";
 
 const GATEWAY_URL = "https://live-png-flow.base44.app/functions/CompanionGateway";
 
@@ -85,7 +87,7 @@ function StatusBadge({ status }) {
 }
 
 function Sidebar({ page, setPage, user, account, onLogout }) {
-  const items = [["dashboard","Dashboard"],["projects","Projects"],["hotkeys","Hotkeys"],["live","Live"],["settings","Settings"]];
+  const items = [["dashboard","Dashboard"],["projects","Projects"],["studio","Studio"],["hotkeys","Hotkeys"],["live","Live"],["diagnostics","Diagnostics"],["settings","Settings"]];
   return <aside className="sidebar"><div className="sidebar-brand"><span>✦</span> LiveSprite</div><nav>{items.map(([id,label]) => <button key={id} className={page === id ? "active" : ""} onClick={() => setPage(id)}>{label}</button>)}</nav><div className="account-chip"><div className="avatar">{(account?.username || user?.email || "L")[0].toUpperCase()}</div><div><strong>{account?.username || "LiveSprite user"}</strong><small>{user?.email}</small></div><button title="Log out" onClick={onLogout}>↪</button></div></aside>;
 }
 
@@ -119,10 +121,36 @@ function Settings({ user, account, nativeStatus, setAutostart, disconnect }) {
   return <><header className="page-header"><div><h1>Settings</h1><p>Account data remains in LiveSprite; desktop preferences remain local.</p></div></header><div className="settings-stack"><section className="panel setting"><div><span className="eyebrow">ACCOUNT</span><h2>{account?.username||"LiveSprite account"}</h2><p>{user.email}</p></div></section><section className="panel setting"><div><span className="eyebrow">DESKTOP</span><h2>Start LiveSprite with Windows</h2><p>Launch the background Companion and restore your project pairing after sign-in.</p></div><button className={`toggle ${nativeStatus?.autostart?"on":""}`} onClick={()=>setAutostart(!nativeStatus?.autostart)} aria-label="Toggle autostart"><i /></button></section><section className="panel setting"><div><span className="eyebrow">NATIVE COMPANION</span><h2>{nativeStatus?.activeProjectName||"No active project"}</h2><p>{nativeStatus?.paired?`${nativeStatus.registeredCount} hotkeys · ${nativeStatus.connected?"Connected":"Reconnecting"}`:"Activate a project to enable native hotkeys."}</p></div>{nativeStatus?.paired&&<button className="danger compact" onClick={disconnect}>Disconnect</button>}</section><section className="panel setting"><div><span className="eyebrow">ABOUT</span><h2>LiveSprite Desktop</h2><p>Version {nativeStatus?.version||"1.1.0"}</p></div></section></div></>;
 }
 
+function ChooseUsername({ user, onComplete }) {
+  const [username,setUsername]=useState("");const [busy,setBusy]=useState(false);const [error,setError]=useState("");
+  const submit=async(event)=>{event.preventDefault();const value=username.trim();if(value.length<3)return setError("Use at least 3 characters.");if(!/^[a-zA-Z0-9_]+$/.test(value))return setError("Use only letters, numbers, and underscores.");setBusy(true);setError("");try{if(await LiveSpriteAPI.account.usernameExists(value))throw new Error("That username is already taken.");const provider=user.email?.toLowerCase().endsWith("@gmail.com")?"google":"local";await LiveSpriteAPI.account.create(user,value,provider);await onComplete();}catch(reason){setError(reason?.message||"Unable to create your LiveSprite account.")}finally{setBusy(false)}};
+  return <AuthShell title="Choose your username" subtitle="This permanent LiveSprite account works on web and desktop" footer={user.email}><form className="form-stack" onSubmit={submit}>{error&&<div className="error-banner">{error}</div>}<label>Username<input value={username} onChange={(e)=>setUsername(e.target.value)} minLength={3} autoFocus required /></label><button className="primary" disabled={busy}>{busy?"Creating account…":"Continue to LiveSprite"}</button></form></AuthShell>;
+}
+
+function Diagnostics({ user, details, nativeStatus }) {
+  const [audio,setAudio]=useState(null);useEffect(()=>{const read=()=>NativeCompanion.getAudioStatus().then(setAudio).catch(()=>setAudio(null));read();const timer=setInterval(read,500);return()=>clearInterval(timer)},[]);
+  const session=details?.sessions?.find((item)=>item.active);
+  const rows=[
+    ["Backend API",details?"Connected":"No project loaded"],
+    ["Authentication",user?.id?"Valid":"Unavailable"],
+    ["Project Sync",details?"Working":"Inactive"],
+    ["Expressions in Database",details?String(details.expressions.length):"—"],
+    ["Current Expression ID",session?.currentExpressionId||"Normal"],
+    ["Microphone",audio?.running?`Connected · ${audio.deviceName}`:"Stopped"],
+    ["Voice State",audio?.running?`${audio.voiceState} · ${audio.levelDb.toFixed(1)} dB`:"Inactive"],
+    ["Global Hotkeys",nativeStatus?.connected?"Active":nativeStatus?.paired?"Reconnecting":"Not paired"],
+    ["Registered Hotkeys",nativeStatus?`${nativeStatus.registeredCount}/${details?.hotkeys?.filter((item)=>item.enabled!==false).length||0}`:"—"],
+    ["Live Session",session?"Active":"Stopped"],
+    ["App Version",nativeStatus?.version||"Unknown"],
+  ];
+  return <><header className="page-header"><div><h1>Diagnostics</h1><p>Current native and backend state—no simulated health indicators.</p></div></header><section className="panel"><div className="data-list">{rows.map(([label,value])=><div key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>{nativeStatus?.conflicts?.length>0&&<div className="warning-panel"><strong>Hotkey conflicts</strong>{nativeStatus.conflicts.map((item)=><span key={item}>{item}</span>)}</div>}</section></>;
+}
+
 export default function App() {
   const [state,setState]=useState("starting"); const [authView,setAuthView]=useState("login"); const [user,setUser]=useState(null); const [account,setAccount]=useState(null); const [projects,setProjects]=useState([]); const [selected,setSelected]=useState(null); const [details,setDetails]=useState(null); const [nativeStatus,setNativeStatus]=useState(null); const [page,setPage]=useState("dashboard"); const [error,setError]=useState(""); const [activating,setActivating]=useState(false);
   const refreshNative=useCallback(async()=>{try{setNativeStatus(await NativeCompanion.getStatus())}catch{}},[]);
   const loadProjects=useCallback(async()=>{const list=await LiveSpriteAPI.projects.list();setProjects(list);setSelected(current=>current||list[0]||null);return list},[]);
+  const reloadDetails=useCallback(async()=>{if(!selected){setDetails(null);return null}const value=await LiveSpriteAPI.projectDetails(selected.id);setDetails(value);return value},[selected]);
   const restore = useCallback(async () => {
     setState("starting");
     setError("");
@@ -138,7 +166,10 @@ export default function App() {
         loadProjects(),
         refreshNative(),
       ]);
+      if (!profile) { setState("onboarding"); return; }
       setAccount(profile);
+      const status=(profile.accountStatus||"active").toLowerCase();
+      if(status!=="active"){setState("blocked");return}
       setState("ready");
     } catch (reason) {
       const message = reason?.message || "Unable to connect to LiveSprite.";
@@ -153,7 +184,8 @@ export default function App() {
   }, [loadProjects, refreshNative]);
   useEffect(()=>{restore()},[restore]);
   useEffect(()=>{const timer=setInterval(refreshNative,5000);return()=>clearInterval(timer)},[refreshNative]);
-  useEffect(()=>{if(!selected){setDetails(null);return}let cancelled=false;LiveSpriteAPI.projectDetails(selected.id).then(value=>{if(!cancelled)setDetails(value)}).catch(reason=>setError(reason?.message||"Unable to load project."));return()=>{cancelled=true}},[selected]);
+  useEffect(()=>{let cancelled=false;if(!selected){setDetails(null);return}LiveSpriteAPI.projectDetails(selected.id).then(value=>{if(!cancelled)setDetails(value)}).catch(reason=>setError(reason?.message||"Unable to load project."));return()=>{cancelled=true}},[selected]);
+  useEffect(()=>{if(!selected)return;let timer;const stop=LiveSpriteAPI.realtime.subscribeProject(selected.id,()=>{clearTimeout(timer);timer=setTimeout(reloadDetails,150)});return()=>{clearTimeout(timer);stop()}},[selected,reloadDetails]);
   const logout=async()=>{await LiveSpriteAPI.auth.logout();setUser(null);setAccount(null);setProjects([]);setDetails(null);setState("auth");setAuthView("login")};
   const createProject=async(name,description)=>{const created=await LiveSpriteAPI.projects.create(name,description);await loadProjects();return created};
   const saveProject=async patch=>{const updated=await LiveSpriteAPI.projects.update(selected.id,patch);setSelected(updated);setProjects(list=>list.map(project=>project.id===updated.id?updated:project));setDetails(current=>({...current,project:updated}))};
@@ -162,9 +194,11 @@ export default function App() {
   const resync=async()=>{try{await NativeCompanion.resync();await refreshNative()}catch(reason){setError(String(reason))}};
   const setAutostart=async enabled=>{try{await NativeCompanion.setAutostart(enabled);await refreshNative()}catch(reason){setError(String(reason))}};
   const disconnect=async()=>{await NativeCompanion.disconnect();await refreshNative()};
-  const content=useMemo(()=>{if(page==="dashboard")return <Dashboard account={account} projects={projects} selected={selected} nativeStatus={nativeStatus} setPage={setPage} onSelect={setSelected}/>;if(page==="projects")return <><Projects projects={projects} selected={selected} selectProject={project=>{setSelected(project)}} refresh={loadProjects} createProject={createProject}/>{selected&&<ProjectOverview details={details} saveProject={saveProject} activate={activate} activating={activating} nativeStatus={nativeStatus}/>}</>;if(page==="hotkeys")return <Hotkeys details={details} nativeStatus={nativeStatus} resync={resync} setPaused={setPaused}/>;if(page==="live")return <LivePage details={details}/>;return <Settings user={user} account={account} nativeStatus={nativeStatus} setAutostart={setAutostart} disconnect={disconnect}/>},[page,account,projects,selected,nativeStatus,details,activating]);
+  const content=useMemo(()=>{if(page==="dashboard")return <Dashboard account={account} projects={projects} selected={selected} nativeStatus={nativeStatus} setPage={setPage} onSelect={setSelected}/>;if(page==="projects")return <><Projects projects={projects} selected={selected} selectProject={project=>{setSelected(project)}} refresh={loadProjects} createProject={createProject}/>{selected&&<ProjectOverview details={details} saveProject={saveProject} activate={activate} activating={activating} nativeStatus={nativeStatus}/>}</>;if(page==="studio")return <Studio details={details} reload={reloadDetails} reportError={setError}/>;if(page==="hotkeys")return <Hotkeys details={details} nativeStatus={nativeStatus} resync={resync} setPaused={setPaused}/>;if(page==="live")return <LiveStudio details={details} reload={reloadDetails} reportError={setError}/>;if(page==="diagnostics")return <Diagnostics user={user} details={details} nativeStatus={nativeStatus}/>;return <Settings user={user} account={account} nativeStatus={nativeStatus} setAutostart={setAutostart} disconnect={disconnect}/>},[page,account,projects,selected,nativeStatus,details,activating,reloadDetails]);
   if(state==="starting")return <Spinner/>;
   if(state==="offline")return <ErrorState title="LiveSprite is Offline" message={`${error} Your native Companion is still running in the background.`} onRetry={restore}/>;
+  if(state==="onboarding")return <ChooseUsername user={user} onComplete={restore}/>;
+  if(state==="blocked")return <ErrorState title="Account unavailable" message={`Your LiveSprite account is ${account?.accountStatus||"not active"}. Contact a LiveSprite administrator for help.`}/>;
   if(state==="auth"){if(authView==="register")return <Register onAuthenticated={restore} setAuthView={setAuthView}/>;if(authView==="forgot")return <ForgotPassword setAuthView={setAuthView}/>;return <Login onAuthenticated={restore} setAuthView={setAuthView}/>}
   return <div className="app-shell"><Sidebar page={page} setPage={setPage} user={user} account={account} onLogout={logout}/><main className="content">{error&&<div className="error-banner dismissible">{error}<button onClick={()=>setError("")}>×</button></div>}{content}</main></div>;
 }

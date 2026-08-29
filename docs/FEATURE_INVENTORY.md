@@ -18,5 +18,10 @@ This inventory was derived from the production LiveSprite bundle and its real Ba
 | Live session state | `LiveSession` | Real current-state summary implemented |
 | Native project authorization | `CompanionGateway` `pair` | Authenticated Base44 invocation implemented |
 | Native sync/events/pause/heartbeat | `CompanionGateway` | Preserved in Rust |
+| PNG upload and metadata | `UploadFile`, `PNGAsset` | Implemented with multi-file drag/drop |
+| State assignment/alignment | `StateAssignment` | Implemented with shared fallback resolver |
+| Dynamic expressions | `Expression`, `StateAssignment` | Create/enable/delete and realtime refresh implemented |
+| Native voice detection | `audioConfig`, `LiveSession` | Native microphone, meter, hysteresis, Talking/Yelling implemented |
+| Live controller | `LiveSession` | Real session start/stop/expression/voice/visibility controls implemented |
 
 Production routes observed include `/dashboard`, `/create`, `/studio/:id`, `/hotkeys/:id`, `/streaming/:id`, `/controller/:id`, `/live/:token`, and `/companion`. Full editor parity should reuse the website components if their source becomes available; this repository currently contains only the deployed bundle, so unverified product logic was intentionally not duplicated.
