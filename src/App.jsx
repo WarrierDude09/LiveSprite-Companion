@@ -123,7 +123,34 @@ export default function App() {
   const [state,setState]=useState("starting"); const [authView,setAuthView]=useState("login"); const [user,setUser]=useState(null); const [account,setAccount]=useState(null); const [projects,setProjects]=useState([]); const [selected,setSelected]=useState(null); const [details,setDetails]=useState(null); const [nativeStatus,setNativeStatus]=useState(null); const [page,setPage]=useState("dashboard"); const [error,setError]=useState(""); const [activating,setActivating]=useState(false);
   const refreshNative=useCallback(async()=>{try{setNativeStatus(await NativeCompanion.getStatus())}catch{}},[]);
   const loadProjects=useCallback(async()=>{const list=await LiveSpriteAPI.projects.list();setProjects(list);setSelected(current=>current||list[0]||null);return list},[]);
-  const restore=useCallback(async()=>{setState("starting");setError("");try{if(!await LiveSpriteAPI.auth.isAuthenticated()){setState("auth");return}const current=await LiveSpriteAPI.auth.me();setUser(current);const [profile]=await Promise.all([LiveSpriteAPI.account.current(current.id),loadProjects(),refreshNative()]);setAccount(profile);setState("ready")}catch(reason){const message=reason?.message||"Unable to connect to LiveSprite.";if(reason?.status===401){setState("auth");setAuthView("login")}else{setError(message);setState("offline")}},[loadProjects,refreshNative]);
+  const restore = useCallback(async () => {
+    setState("starting");
+    setError("");
+    try {
+      if (!await LiveSpriteAPI.auth.isAuthenticated()) {
+        setState("auth");
+        return;
+      }
+      const current = await LiveSpriteAPI.auth.me();
+      setUser(current);
+      const [profile] = await Promise.all([
+        LiveSpriteAPI.account.current(current.id),
+        loadProjects(),
+        refreshNative(),
+      ]);
+      setAccount(profile);
+      setState("ready");
+    } catch (reason) {
+      const message = reason?.message || "Unable to connect to LiveSprite.";
+      if (reason?.status === 401) {
+        setState("auth");
+        setAuthView("login");
+      } else {
+        setError(message);
+        setState("offline");
+      }
+    }
+  }, [loadProjects, refreshNative]);
   useEffect(()=>{restore()},[restore]);
   useEffect(()=>{const timer=setInterval(refreshNative,5000);return()=>clearInterval(timer)},[refreshNative]);
   useEffect(()=>{if(!selected){setDetails(null);return}let cancelled=false;LiveSpriteAPI.projectDetails(selected.id).then(value=>{if(!cancelled)setDetails(value)}).catch(reason=>setError(reason?.message||"Unable to load project."));return()=>{cancelled=true}},[selected]);
