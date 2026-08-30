@@ -1,6 +1,6 @@
 [package]
 name = "livesprite"
-version = "1.3.0-rc.1"
+version = "1.3.0-2"
 description = "LiveSprite desktop application"
 authors = ["LiveSprite"]
 edition = "2021"
