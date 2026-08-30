@@ -107,6 +107,12 @@ async fn test_hotkey_action(app:AppHandle,state:State<'_,Arc<AppState>>,binding_
     if mode.eq_ignore_ascii_case("hold"){send_binding_event(&app,state.inner(),binding_id.trim(),true).await?}
     Ok(())
 }
+#[tauri::command]
+fn set_close_to_tray(state:State<'_,Arc<AppState>>,enabled:bool)->Result<(),String>{
+    let mut config=state.config.lock().map_err(|_|"Config unavailable")?;
+    config.close_to_tray=enabled;
+    save_config(&state.config_path,&config)
+}
 
 fn load_config(path:&PathBuf)->CompanionConfig{fs::read_to_string(path).ok().and_then(|v|serde_json::from_str(&v).ok()).unwrap_or_default()}
 fn save_config(path:&PathBuf,c:&CompanionConfig)->Result<(),String>{if let Some(p)=path.parent(){fs::create_dir_all(p).map_err(|e|e.to_string())?}fs::write(path,serde_json::to_string_pretty(c).map_err(|e|e.to_string())?).map_err(|e|e.to_string())}
@@ -211,7 +217,7 @@ fn main(){tauri::Builder::default()
     .plugin(tauri_plugin_single_instance::init(|app,_args,_cwd|{let _=show_main(app);}))
     .plugin(tauri_plugin_opener::init()).plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent,None))
     .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app,shortcut,event|dispatch(app,shortcut,event.state())).build())
-    .invoke_handler(tauri::generate_handler![get_companion_status,activate_project_pairing,resync_hotkeys,set_hotkeys_paused,set_autostart,disconnect_companion,show_main_window,exit_application,list_microphones,start_voice_engine,stop_voice_engine,get_audio_status,test_hotkey_action,open_external])
+    .invoke_handler(tauri::generate_handler![get_companion_status,activate_project_pairing,resync_hotkeys,set_hotkeys_paused,set_autostart,set_close_to_tray,disconnect_companion,show_main_window,exit_application,list_microphones,start_voice_engine,stop_voice_engine,get_audio_status,test_hotkey_action,open_external])
     .on_window_event(|window,event|{if window.label()=="main"{if let WindowEvent::CloseRequested{api,..}=event{if window.state::<Arc<AppState>>().config().close_to_tray{api.prevent_close();let _=window.hide();}}}})
     .setup(|app|{let path=app.path().app_config_dir()?.join("companion.json");let mut c=load_config(&path);let auto=app.autolaunch().is_enabled().unwrap_or(c.start_with_os);c.start_with_os=auto;let _=save_config(&path,&c);
         let s=Arc::new(AppState{config:Mutex::new(c.clone()),config_path:path,bindings:Mutex::new(HashMap::new()),conflicts:Mutex::new(Vec::new()),registered_count:Mutex::new(0),paused:AtomicBool::new(false),syncing:AtomicBool::new(false),synced:AtomicBool::new(false),client:Client::builder().timeout(Duration::from_secs(8)).build()?,event_lock:tokio::sync::Mutex::new(()),status_item:Mutex::new(None),project_item:Mutex::new(None),voice_item:Mutex::new(None),pause_item:Mutex::new(None),autostart_item:Mutex::new(None),audio:AudioEngine::default()});app.manage(s.clone());

@@ -5,6 +5,7 @@ export const NativeCompanion = {
   resync: () => invoke("resync_hotkeys"),
   setPaused: (paused) => invoke("set_hotkeys_paused", { paused }),
   setAutostart: (enabled) => invoke("set_autostart", { enabled }),
+  setCloseToTray: (enabled) => invoke("set_close_to_tray", { enabled }),
   activateProject: ({ pairToken, projectId, projectName, gatewayUrl }) =>
     invoke("activate_project_pairing", {
       pairToken,
