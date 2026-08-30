@@ -53,7 +53,7 @@ struct AppState {
     syncing:AtomicBool, synced:AtomicBool, client:Client,
     event_lock:tokio::sync::Mutex<()>,
     status_item:Mutex<Option<MenuItem<tauri::Wry>>>, project_item:Mutex<Option<MenuItem<tauri::Wry>>>,
-    pause_item:Mutex<Option<MenuItem<tauri::Wry>>>, autostart_item:Mutex<Option<MenuItem<tauri::Wry>>>,
+    voice_item:Mutex<Option<MenuItem<tauri::Wry>>>, pause_item:Mutex<Option<MenuItem<tauri::Wry>>>, autostart_item:Mutex<Option<MenuItem<tauri::Wry>>>,
     audio: AudioEngine,
 }
 impl AppState { fn config(&self)->CompanionConfig { self.config.lock().expect("config lock").clone() } }
@@ -95,9 +95,9 @@ fn disconnect_companion(app:AppHandle,state:State<'_,Arc<AppState>>)->Result<(),
 #[tauri::command] fn show_main_window(app:AppHandle)->Result<(),String>{show_main(&app)}
 #[tauri::command] fn exit_application(app:AppHandle){app.exit(0)}
 #[tauri::command] fn list_microphones(state:State<'_,Arc<AppState>>)->Result<Vec<String>,String>{state.audio.devices()}
-#[tauri::command] fn start_voice_engine(app:AppHandle,state:State<'_,Arc<AppState>>,config:VoiceConfig)->Result<(),String>{state.audio.start(config,app)}
-#[tauri::command] fn stop_voice_engine(state:State<'_,Arc<AppState>>){state.audio.stop()}
-#[tauri::command] fn get_audio_status(state:State<'_,Arc<AppState>>)->AudioStatus{state.audio.status()}
+#[tauri::command] fn start_voice_engine(app:AppHandle,state:State<'_,Arc<AppState>>,config:VoiceConfig)->Result<(),String>{state.audio.start(config,app)?;update_voice(&state,true);Ok(())}
+#[tauri::command] fn stop_voice_engine(state:State<'_,Arc<AppState>>){state.audio.stop();update_voice(&state,false)}
+#[tauri::command] fn get_audio_status(state:State<'_,Arc<AppState>>)->AudioStatus{let status=state.audio.status();update_voice(&state,status.running);status}
 #[tauri::command]
 fn open_external(url:String)->Result<(),String>{let parsed=reqwest::Url::parse(&url).map_err(|_|"Invalid URL".to_string())?;if parsed.scheme()!="https"||parsed.host_str()!=Some("live-png-flow.base44.app")||!parsed.path().starts_with("/live/"){return Err("Only LiveSprite streaming preview links can be opened.".into())}open::that_detached(parsed.as_str()).map_err(|e|e.to_string())}
 #[tauri::command]
@@ -160,6 +160,11 @@ fn update_pause(s: &AppState) {
         if let Some(item) = item.as_ref() { let _ = item.set_text(text); }
     }
 }
+fn update_voice(s: &AppState, running: bool) {
+    if let Ok(item) = s.voice_item.lock() {
+        if let Some(item) = item.as_ref() { let _ = item.set_text(if running { "Voice Detection: Active" } else { "Voice Detection: Stopped" }); }
+    }
+}
 fn update_autostart(s: &AppState, on: bool) {
     if let Ok(item) = s.autostart_item.lock() {
         if let Some(item) = item.as_ref() { let _ = item.set_text(if on { "Disable autostart" } else { "Start with OS" }); }
@@ -209,10 +214,10 @@ fn main(){tauri::Builder::default()
     .invoke_handler(tauri::generate_handler![get_companion_status,activate_project_pairing,resync_hotkeys,set_hotkeys_paused,set_autostart,disconnect_companion,show_main_window,exit_application,list_microphones,start_voice_engine,stop_voice_engine,get_audio_status,test_hotkey_action,open_external])
     .on_window_event(|window,event|{if window.label()=="main"{if let WindowEvent::CloseRequested{api,..}=event{if window.state::<Arc<AppState>>().config().close_to_tray{api.prevent_close();let _=window.hide();}}}})
     .setup(|app|{let path=app.path().app_config_dir()?.join("companion.json");let mut c=load_config(&path);let auto=app.autolaunch().is_enabled().unwrap_or(c.start_with_os);c.start_with_os=auto;let _=save_config(&path,&c);
-        let s=Arc::new(AppState{config:Mutex::new(c.clone()),config_path:path,bindings:Mutex::new(HashMap::new()),conflicts:Mutex::new(Vec::new()),registered_count:Mutex::new(0),paused:AtomicBool::new(false),syncing:AtomicBool::new(false),synced:AtomicBool::new(false),client:Client::builder().timeout(Duration::from_secs(8)).build()?,event_lock:tokio::sync::Mutex::new(()),status_item:Mutex::new(None),project_item:Mutex::new(None),pause_item:Mutex::new(None),autostart_item:Mutex::new(None),audio:AudioEngine::default()});app.manage(s.clone());
+        let s=Arc::new(AppState{config:Mutex::new(c.clone()),config_path:path,bindings:Mutex::new(HashMap::new()),conflicts:Mutex::new(Vec::new()),registered_count:Mutex::new(0),paused:AtomicBool::new(false),syncing:AtomicBool::new(false),synced:AtomicBool::new(false),client:Client::builder().timeout(Duration::from_secs(8)).build()?,event_lock:tokio::sync::Mutex::new(()),status_item:Mutex::new(None),project_item:Mutex::new(None),voice_item:Mutex::new(None),pause_item:Mutex::new(None),autostart_item:Mutex::new(None),audio:AudioEngine::default()});app.manage(s.clone());
         let status=MenuItem::with_id(app,"status",if c.pair_token.is_empty(){"Status: Not paired"}else{"Status: Disconnected"},false,None::<&str>)?;let project=MenuItem::with_id(app,"project",if c.active_project_name.is_empty(){"Active Project: None".into()}else{format!("Active Project: {}",c.active_project_name)},false,None::<&str>)?;
-        let open=MenuItem::with_id(app,"open","Open LiveSprite",true,None::<&str>)?;let pause=MenuItem::with_id(app,"pause","Pause Hotkeys",true,None::<&str>)?;let resync=MenuItem::with_id(app,"resync","Re-sync Hotkeys",true,None::<&str>)?;let autostart=MenuItem::with_id(app,"autostart",if auto{"Disable autostart"}else{"Start with OS"},true,None::<&str>)?;let exit=MenuItem::with_id(app,"exit","Exit LiveSprite",true,None::<&str>)?;
-        let menu=Menu::with_items(app,&[&status,&project,&open,&pause,&resync,&autostart,&exit])?;*s.status_item.lock().expect("status lock")=Some(status);*s.project_item.lock().expect("project lock")=Some(project);*s.pause_item.lock().expect("pause lock")=Some(pause);*s.autostart_item.lock().expect("autostart lock")=Some(autostart);
+        let voice=MenuItem::with_id(app,"voice","Voice Detection: Stopped",false,None::<&str>)?;let open=MenuItem::with_id(app,"open","Open LiveSprite",true,None::<&str>)?;let pause=MenuItem::with_id(app,"pause","Pause Hotkeys",true,None::<&str>)?;let resync=MenuItem::with_id(app,"resync","Re-sync Hotkeys",true,None::<&str>)?;let autostart=MenuItem::with_id(app,"autostart",if auto{"Disable autostart"}else{"Start with OS"},true,None::<&str>)?;let exit=MenuItem::with_id(app,"exit","Exit LiveSprite",true,None::<&str>)?;
+        let menu=Menu::with_items(app,&[&status,&project,&voice,&open,&pause,&resync,&autostart,&exit])?;*s.status_item.lock().expect("status lock")=Some(status);*s.project_item.lock().expect("project lock")=Some(project);*s.voice_item.lock().expect("voice lock")=Some(voice);*s.pause_item.lock().expect("pause lock")=Some(pause);*s.autostart_item.lock().expect("autostart lock")=Some(autostart);
         TrayIconBuilder::with_id("main-tray").icon(app.default_window_icon().cloned().expect("icon missing")).tooltip("LiveSprite").menu(&menu).show_menu_on_left_click(false)
             .on_tray_icon_event(|tray,event|{if matches!(event,TrayIconEvent::DoubleClick{..}){let _=show_main(tray.app_handle());}})
             .on_menu_event(|app,event|match event.id().as_ref(){"open"=>{let _=show_main(app);},"resync"=>spawn_sync(app.clone()),"pause"=>{let s=app.state::<Arc<AppState>>().inner().clone();tauri::async_runtime::spawn(async move{let p=!s.paused.load(Ordering::Acquire);if set_paused(&s,p).await.is_err(){update_status(&s,"Status: Disconnected");}});},"autostart"=>{let s=app.state::<Arc<AppState>>().inner().clone();let on=!app.autolaunch().is_enabled().unwrap_or(false);if(if on{app.autolaunch().enable()}else{app.autolaunch().disable()}).is_ok(){if let Ok(mut c)=s.config.lock(){c.start_with_os=on;let _=save_config(&s.config_path,&c);}update_autostart(&s,on);}},"exit"=>app.exit(0),_=>{}}).build(app)?;
