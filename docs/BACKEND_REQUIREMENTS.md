@@ -1,6 +1,6 @@
 # Backend requirements discovered during Desktop migration
 
-The deployed LiveSprite frontend and public Base44 SDK establish the existing data contracts. Desktop now consumes those contracts directly. Two requested security-sensitive features cannot be implemented solely in an untrusted desktop bundle without adding verified backend functions.
+The deployed LiveSprite frontend and public Base44 SDK establish the existing data contracts. Desktop now consumes those contracts directly. The following security-sensitive or background-delivery features cannot be completed solely in an untrusted desktop bundle without verified backend functions or release-owner credentials.
 
 ## Google OAuth desktop code exchange
 
@@ -23,6 +23,18 @@ Codes must be hashed at rest, single-use, account-bound, device-flow-bound, audi
 The native engine detects Idle/Talking/Yelling locally. The authenticated frontend currently writes transitions to the existing `LiveSession` entity. For guaranteed delivery while the WebView is suspended, add a narrowly scoped CompanionGateway action authorized by the existing project pair token, such as `voiceState`, accepting only `idle`, `talking`, or `yelling` and updating only the paired project's active Live Session.
 
 No service-role credential belongs in Desktop.
+
+## Streaming-source lifecycle and renderer
+
+The deployed backend exposes read functions named `GetStreamingSource` and `GetLiveSessionState`, but this repository does not contain the renderer or an authenticated server-side create/regenerate/revoke function. The current authenticated client can persist a cryptographically random token through the existing `StreamingSource` entity permissions, but production should move token issuance and rotation behind a backend function that:
+
+1. Authenticates the user and verifies access to the project.
+2. Generates the token server-side and stores only the representation required by the renderer.
+3. Atomically invalidates the previous token during regeneration or revocation.
+4. Returns the resulting source record without granting broader project or account access.
+5. Audits lifecycle changes without logging the token.
+
+The backend-hosted `/live/:token` source must also be tested and, if needed, repaired in its own source repository for transparent backgrounds, last-frame retention, and silent realtime reconnection. Those renderer behaviors cannot be changed from this desktop repository.
 
 ## Signed desktop updater
 
