@@ -32,7 +32,7 @@ pub struct AudioStatus {
 }
 
 struct Detector {
-    current: u8, candidate: u8, since: Instant, config: VoiceConfig, denoiser: Box<DenoiseState>,
+    current: u8, candidate: u8, since: Instant, config: VoiceConfig, denoiser: Box<DenoiseState<'static>>,
     pending: Vec<f32>, smoothed_db: f32,
 }
 
