@@ -36,16 +36,21 @@ Vite builds the React frontend, then Tauri builds the native application. Bundle
 Push a release tag to `WarrierDude09/LiveSprite-Companion`:
 
 ```sh
-git tag companion-v1.1.0
-git push origin companion-v1.1.0
+git tag companion-v1.3.0
+git push origin companion-v1.3.0
 ```
 
-`.github/workflows/companion-release.yml` builds all platforms and uploads these exact legacy filenames:
+`.github/workflows/companion-release.yml` builds all platforms. Windows publishes the preferred branded installer plus the exact legacy MSI filename required by the existing download backend:
 
+- `LiveSprite-Windows-x64-Setup.exe`
 - `LiveSprite-Companion-Windows-x64.msi`
 - `LiveSprite-Companion-macOS.dmg`
 - `LiveSprite-Companion-Linux-x86_64.AppImage`
 
 Ensure the separate web app's `base44/functions/GetCompanionRelease/entry.ts` uses `WarrierDude09/LiveSprite-Companion`. Unsigned Windows and macOS builds may show trust warnings; production distribution requires platform signing credentials.
+
+## Verification status
+
+The `companion-v1.3.0-rc.2` prerelease completed successfully on the GitHub-hosted Windows, macOS, and Linux runners. It produced both Windows installer formats, the macOS DMG, and the Linux AppImage. The local development host does not currently contain Rust, Cargo, or Visual Studio Build Tools, so Rust compilation was verified by CI rather than claimed as a local build. A release remains blocked until the backend contracts in [`docs/BACKEND_REQUIREMENTS.md`](docs/BACKEND_REQUIREMENTS.md), platform signing, fresh-machine installer checks, and an authenticated end-to-end project test are completed.
 
 
