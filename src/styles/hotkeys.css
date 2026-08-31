@@ -1,0 +1,11 @@
+.hotkey-editor { display: grid; gap: 12px; }
+.hotkey-card { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(300px, 1.5fr) auto; gap: 16px; align-items: center; padding: 15px; border: 1px solid #ffffff10; border-radius: 14px; background: #ffffff05; }
+.hotkey-card.invalid { border-color: #ef526d66; }
+.hotkey-title { display: grid; gap: 4px; }
+.hotkey-title small,.keybind-capture small { color: #858ba9; }
+.hotkey-options { display: flex; gap: 8px; align-items: center; }
+.hotkey-options select { min-width: 100px; }
+.keybind-capture { display: grid; gap: 8px; }
+.keybind-capture kbd { min-height: 34px; display: flex; align-items: center; width: fit-content; }
+.conflict-text { color: #f1c671 !important; }
+@media(max-width:1100px){.hotkey-card{grid-template-columns:1fr}.hotkey-options{flex-wrap:wrap}}

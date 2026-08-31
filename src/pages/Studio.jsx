@@ -1,6 +1,8 @@
 import React, { useMemo, useRef, useState } from "react";
 import { LiveSpriteAPI } from "../api/liveSpriteApi";
 import { resolveArtwork, validateCoreStates } from "../runtime/stateResolver";
+import { animationRuntime } from "../runtime/animationEngine";
+import CharacterRenderer from "../components/CharacterRenderer";
 import "../styles/expressions.css";
 
 const BASE_STATES = [
@@ -20,6 +22,7 @@ export default function Studio({ details, reload, reportError }) {
   const health = validateCoreStates(details?.states);
   const preview = useMemo(() => details ? resolveArtwork({ expressionId: activeExpression, voiceState: previewVoice, blinking, assignments: details.states, assets: details.assets }) : null,
     [details, activeExpression, previewVoice, blinking]);
+  const animation = useMemo(() => animationRuntime(project, previewVoice), [project, previewVoice]);
 
   if (!details) return <section className="panel empty"><h2>Select a project</h2><p>Open one of your LiveSprite projects before entering Studio.</p></section>;
 
@@ -59,10 +62,11 @@ export default function Studio({ details, reload, reportError }) {
           <input ref={input} hidden type="file" accept="image/png" multiple onChange={(e) => upload(e.target.files)} />
           <strong>{uploading ? "Uploading…" : "Drop PNG files here"}</strong><small>or browse files · originals are not modified</small>
         </div>
-        <div className="asset-grid">{details.assets.map((asset) => <div className="asset-tile" key={asset.id}><img src={asset.fileUrl} alt={asset.displayName} /><strong>{asset.displayName}</strong><small>{asset.width}×{asset.height} · {asset.hasTransparency ? "Transparent" : "Opaque"}</small></div>)}</div>
+        <div className="asset-grid">{details.assets.map((asset) => <div className="asset-tile" key={asset.id}><CharacterRenderer asset={asset} alt={asset.displayName} /><strong>{asset.displayName}</strong><small>{asset.width}×{asset.height} · {asset.hasTransparency ? "Transparent" : "Opaque"}</small></div>)}</div>
       </section>
-      <section className="panel preview-panel"><span className="eyebrow">SHARED STATE RESOLVER</span><div className="character-preview">{preview ? <img src={preview.asset.fileUrl} alt="Resolved character state" style={{ transform: `translate(${preview.assignment.positionX || 0}px, ${preview.assignment.positionY || 0}px) scale(${preview.assignment.scale || 1})` }} /> : <div className="empty-preview">Assign Idle and Talking PNGs</div>}</div>
+      <section className="panel preview-panel"><span className="eyebrow">SHARED STATE RESOLVER</span><div className="character-preview"><CharacterRenderer resolved={preview} alt="Resolved character state" animationClassName={animation.className} animationStyle={animation.style} /></div>
         <div className="preview-controls">{["idle","talking","yelling"].map((voice) => <button key={voice} className={previewVoice === voice ? "primary compact" : "secondary compact"} onClick={() => setPreviewVoice(voice)}>{voice}</button>)}<button className={blinking ? "primary compact" : "secondary compact"} onClick={() => setBlinking(!blinking)}>Blink</button></div>
+        <small className="runtime-note">Animation: {animation.active.length ? animation.active.join(" + ") : "none active"}</small>
         <select value={activeExpression} onChange={(e) => setActiveExpression(e.target.value)}><option value="">Normal</option>{details.expressions.filter((item) => item.enabled !== false).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
       </section>
     </div>

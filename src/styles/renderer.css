@@ -1,0 +1,53 @@
+.character-renderer-error,
+.character-renderer-empty {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 7px;
+  min-height: 120px;
+  padding: 20px;
+  color: #9298b3;
+  text-align: center;
+}
+
+.character-renderer-error strong { color: #ffb7c2; }
+.character-renderer-error span { max-width: 520px; overflow-wrap: anywhere; font-size: 11px; }
+.character-renderer-error button { margin-top: 5px; }
+.project-art { overflow: hidden; }
+.project-art img { width: 100%; height: 100%; object-fit: contain; }
+.project-art .character-renderer-error { min-height: 0; padding: 4px; font-size: 0; }
+.project-art .character-renderer-error span,
+.project-art .character-renderer-error button { display: none; }
+.dashboard-character { width: 250px; height: 190px; display: grid; place-items: center; overflow: hidden; }
+.dashboard-character img { max-width: 100%; max-height: 100%; object-fit: contain; }
+
+.anim-idle-breathing {
+  animation: livesprite-idle-breathing var(--idle-duration, 3s) ease-in-out infinite;
+  transform-origin: 50% 85%;
+}
+
+.anim-talking-bounce {
+  animation: livesprite-talking-bounce var(--talk-duration, .42s) ease-in-out infinite;
+  transform-origin: 50% 92%;
+}
+
+.anim-yelling-shake {
+  animation: livesprite-yelling-shake var(--yell-duration, .12s) linear infinite;
+  transform-origin: 50% 80%;
+}
+
+@keyframes livesprite-idle-breathing {
+  0%, 100% { transform: var(--base-transform) translateY(0) scale(1); }
+  50% { transform: var(--base-transform) translateY(calc(-4px * var(--idle-strength, 1))) scale(calc(1 + .018 * var(--idle-strength, 1))); }
+}
+
+@keyframes livesprite-talking-bounce {
+  0%, 100% { transform: var(--base-transform) translateY(0) scale(1); }
+  45% { transform: var(--base-transform) translateY(calc(-10px * var(--talk-strength, 1))) scaleX(calc(1 + .018 * var(--talk-strength, 1))) scaleY(calc(1 - .012 * var(--talk-strength, 1))); }
+}
+
+@keyframes livesprite-yelling-shake {
+  0% { transform: var(--base-transform) translate(calc(-3px * var(--yell-strength, 1)), calc(-1px * var(--yell-strength, 1))) rotate(calc(-1.2deg * var(--yell-strength, 1))); }
+  50% { transform: var(--base-transform) translate(calc(3px * var(--yell-strength, 1)), calc(1px * var(--yell-strength, 1))) rotate(calc(1.2deg * var(--yell-strength, 1))); }
+  100% { transform: var(--base-transform) translate(calc(-2px * var(--yell-strength, 1)), 0) rotate(calc(-.8deg * var(--yell-strength, 1))); }
+}

@@ -4,6 +4,10 @@ const DEFAULT_AUDIO = {
   noiseGateDb: -55,
   talkingThresholdDb: -38,
   yellingThresholdDb: -18,
+  noiseSuppressionEnabled: true,
+  suppressionStrength: "medium",
+  sensitivity: 1,
+  smoothing: 0.72,
   attackMs: 80,
   releaseMs: 220,
   inputDeviceId: "",
@@ -84,6 +88,9 @@ export const LiveSpriteAPI = {
     return { project, assets, states, expressions, hotkeys, streams, sessions };
   },
   hotkeys: {
+    create: (data) => base44.entities.HotkeyBinding.create(data),
+    update: (id, patch) => base44.entities.HotkeyBinding.update(id, patch),
+    delete: (id) => base44.entities.HotkeyBinding.delete(id),
     subscribe: (callback) => base44.entities.HotkeyBinding.subscribe(callback),
   },
   assets: {
@@ -145,9 +152,35 @@ export const LiveSpriteAPI = {
     stop: (id) => base44.entities.LiveSession.update(id, { active: false }),
     subscribe: (callback) => base44.entities.LiveSession.subscribe(callback),
   },
+  streams: {
+    link(source) { return source?.token ? `https://live-png-flow.base44.app/live/${encodeURIComponent(source.token)}` : ""; },
+    async create(project) {
+      const config = project.streamingConfig || {};
+      return base44.entities.StreamingSource.create({ projectId: project.id, token: secureRendererToken(), active: true, outputWidth: config.outputWidth || 1920, outputHeight: config.outputHeight || 1080, backgroundMode: "transparent" });
+    },
+    regenerate: (source) => base44.entities.StreamingSource.update(source.id, { token: secureRendererToken(), active: true, revokedAt: null }),
+    revoke: (source) => base44.entities.StreamingSource.update(source.id, { active: false, revokedAt: new Date().toISOString() }),
+    update: (id, patch) => base44.entities.StreamingSource.update(id, patch),
+    async test(source) {
+      const [renderer, session] = await Promise.all([
+        base44.functions.invoke("GetStreamingSource", { token: source.token }),
+        base44.functions.invoke("GetLiveSessionState", { token: source.token }),
+      ]);
+      const output = renderer?.data ?? renderer;
+      const live = session?.data ?? session;
+      return {
+        sourceLoaded: !output?.error,
+        transparent: output?.output?.backgroundMode === "transparent",
+        idle: Boolean(output?.stateUrls?.idle),
+        talking: Boolean(output?.stateUrls?.talking),
+        yelling: Boolean(output?.stateUrls?.yelling || output?.stateUrls?.talking),
+        liveConnected: !live?.error,
+      };
+    },
+  },
   realtime: {
     subscribeProject(projectId, callback) {
-      const entities = [base44.entities.PNGAsset, base44.entities.StateAssignment, base44.entities.Expression, base44.entities.HotkeyBinding, base44.entities.LiveSession];
+      const entities = [base44.entities.PNGAsset, base44.entities.StateAssignment, base44.entities.Expression, base44.entities.HotkeyBinding, base44.entities.LiveSession, base44.entities.StreamingSource, base44.entities.PNGTuberProject];
       const stops = entities.map((entity) => entity.subscribe((event) => {
         if (event?.data?.projectId === projectId) callback(event);
       }));
@@ -168,7 +201,20 @@ export const LiveSpriteAPI = {
       return result;
     },
   },
+  diagnostics: {
+    async backendLatency() {
+      const start = performance.now();
+      await base44.auth.me();
+      return Math.round(performance.now() - start);
+    },
+  },
 };
+
+function secureRendererToken() {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
+}
 
 function readImageMetadata(file) {
   return new Promise((resolve, reject) => {

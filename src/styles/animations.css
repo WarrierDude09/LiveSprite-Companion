@@ -1,0 +1,84 @@
+.animation-layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.9fr) minmax(360px, 1.1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.animation-preview {
+  position: sticky;
+  top: 24px;
+}
+
+.animation-card {
+  display: grid;
+  gap: 16px;
+}
+
+.animation-card-head {
+  display: flex;
+  gap: 18px;
+  align-items: start;
+  justify-content: space-between;
+}
+
+.animation-card h2 {
+  margin-bottom: 4px;
+}
+
+.animation-card p {
+  margin-top: 0;
+}
+
+.animation-controls {
+  display: grid;
+  gap: 12px;
+}
+
+.animation-controls label {
+  display: grid;
+  grid-template-columns: 82px 1fr 62px;
+  gap: 12px;
+  align-items: center;
+  color: #c8cce2;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.animation-controls input[type="range"] {
+  accent-color: #c957f3;
+}
+
+.runtime-note {
+  display: block;
+  color: #8d93b0;
+  margin: 8px 0 10px;
+}
+
+.logs-panel {
+  margin-top: 16px;
+}
+
+.log-viewer {
+  max-height: 280px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border: 1px solid #ffffff12;
+  border-radius: 12px;
+  background: #070914;
+  color: #cfd3ec;
+  padding: 14px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+@media (max-width: 1080px) {
+  .animation-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .animation-preview {
+    position: static;
+  }
+}

@@ -35,6 +35,10 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libasound2-dev patchelf
       - run: npm install
+      - name: Run Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+      - name: Run Rust Clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets
       - name: Build application
         id: app-build
         shell: bash
@@ -45,6 +49,10 @@ jobs:
         if: matrix.platform == 'windows-latest'
         shell: pwsh
         run: Copy-Item (Get-ChildItem src-tauri/target/release/bundle/msi/*.msi | Select-Object -First 1) "${{ matrix.artifact }}"
+      - name: Stage Windows setup executable
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: Copy-Item (Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1) "LiveSprite-Windows-x64-Setup.exe"
       - name: Stage macOS bundle
         if: matrix.platform == 'macos-latest'
         run: cp "$(find src-tauri/target/release/bundle/dmg -name '*.dmg' -print -quit)" "${{ matrix.artifact }}"
@@ -56,6 +64,13 @@ jobs:
         with:
           name: ${{ github.ref_name }}
           files: ${{ matrix.artifact }}
+          prerelease: ${{ contains(github.ref_name, '-rc.') }}
+      - uses: softprops/action-gh-release@v2
+        if: success() && matrix.platform == 'windows-latest'
+        with:
+          name: ${{ github.ref_name }}
+          files: LiveSprite-Windows-x64-Setup.exe
+          prerelease: ${{ contains(github.ref_name, '-rc.') }}
       - name: Publish failure diagnostics
         if: failure() && steps.app-build.outcome == 'failure'
         uses: softprops/action-gh-release@v2
